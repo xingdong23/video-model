@@ -116,7 +116,14 @@ class AlignRestore:
         self.device = device
         self.dtype = dtype
         self.fill_value = torch.tensor([127, 127, 127], device=device, dtype=dtype)
-        self.mask = torch.ones((1, 1, self.face_size[1], self.face_size[0]), device=device, dtype=dtype)
+        # Lower-face gradient mask: preserves original eyes/forehead, only replaces mouth/jaw
+        h, w = self.face_size[1], self.face_size[0]
+        mask = torch.ones((1, 1, h, w), device=device, dtype=dtype)
+        # Top 40% fades from 0→1, bottom 60% stays at 1
+        fade_end = int(h * 0.45)
+        for y in range(fade_end):
+            mask[:, :, y, :] = y / fade_end
+        self.mask = mask
 
     def align_warp_face(self, img: np.ndarray, landmarks3: np.ndarray, smooth: bool = True):
         affine_matrix, self.p_bias = self.transformation_from_points(
@@ -163,7 +170,6 @@ class AlignRestore:
         )
 
         inv_mask_erosion_t = inv_mask_erosion.squeeze(0).expand_as(inv_face)
-        pasted_face = inv_mask_erosion_t * inv_face
         total_face_area = torch.sum(inv_mask_erosion.float())
         w_edge = int(total_face_area ** 0.5) // 20
         erosion_radius = w_edge * 2
@@ -175,7 +181,22 @@ class AlignRestore:
         )
         inv_mask_center_tensor = torch.from_numpy(inv_mask_center).to(device=self.device, dtype=self.dtype)[None, None, ...]
 
-        blur_size = w_edge * 2 + 1
+        # Color correction: match generated face color to original in the overlap region
+        mask_for_color = inv_mask_erosion_t > 0.5
+        if mask_for_color.any():
+            for ch in range(3):
+                gen_ch = inv_face[ch][mask_for_color[ch]]
+                orig_ch = input_tensor[ch][mask_for_color[ch]]
+                if gen_ch.numel() > 100:
+                    gen_mean, gen_std = gen_ch.mean(), gen_ch.std().clamp(min=1.0)
+                    orig_mean, orig_std = orig_ch.mean(), orig_ch.std().clamp(min=1.0)
+                    inv_face[ch] = (inv_face[ch] - gen_mean) * (orig_std / gen_std) + orig_mean
+            inv_face = inv_face.clamp(0, 255)
+
+        pasted_face = inv_mask_erosion_t * inv_face
+
+        # Wider blur for smoother blending transition
+        blur_size = w_edge * 4 + 1
         sigma = 0.3 * ((blur_size - 1) * 0.5 - 1) + 0.8
         inv_soft_mask = kornia.filters.gaussian_blur2d(
             inv_mask_center_tensor, (blur_size, blur_size), (sigma, sigma)
@@ -346,7 +367,7 @@ class LstmSync:
         self.runtime = runtime
         self.face_size = get_model_face_size(self.human_path)
         self.wav2lip_batch_size = batch_size
-        self.syncnet_T = 16
+        self.syncnet_T = 32
         self.audio_type = "hubert"
         self.sync_offset = sync_offset
         self.scale_h = scale_h
