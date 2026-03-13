@@ -75,6 +75,7 @@ async def mix_bgm(req: BgmMixRequest, request: Request):
         },
         executor_fn=_execute_mix,
         request_id=request.headers.get("X-Request-ID"),
+        callback_url=req.callback_url,
         gpu=False,
     )
     return success_response({"task_id": task_id})

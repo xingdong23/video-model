@@ -82,6 +82,7 @@ async def generate_srt(req: SubtitleGenerateSrtRequest, request: Request):
         },
         executor_fn=_execute_generate_srt,
         request_id=request.headers.get("X-Request-ID"),
+        callback_url=req.callback_url,
         gpu=True,
     )
     return success_response({"task_id": task_id})
@@ -185,6 +186,7 @@ async def burn_subtitles(req: SubtitleBurnRequest, request: Request):
         },
         executor_fn=_execute_burn,
         request_id=request.headers.get("X-Request-ID"),
+        callback_url=req.callback_url,
         gpu=False,
     )
     return success_response({"task_id": task_id})

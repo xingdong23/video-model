@@ -8,7 +8,15 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
+import httpx
+
 logger = logging.getLogger("api.task_manager")
+
+# ── Webhook configuration ──
+# Default callback timeout and retry
+_WEBHOOK_TIMEOUT = 10  # seconds
+_WEBHOOK_MAX_RETRIES = 3
+_WEBHOOK_RETRY_DELAYS = (1, 3, 10)  # seconds between retries
 
 
 @dataclass
@@ -24,6 +32,7 @@ class Task:
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
     request_id: Optional[str] = None
+    callback_url: Optional[str] = None
     _cancelled: threading.Event = field(default_factory=threading.Event, repr=False)
 
     def to_dict(self) -> dict:
@@ -44,6 +53,39 @@ class Task:
 
 # Sentinel value to signal worker threads to shut down
 _SHUTDOWN = object()
+
+
+def _fire_webhook(task: Task) -> None:
+    """POST task result to callback_url with retries. Best-effort, never raises."""
+    if not task.callback_url:
+        return
+
+    payload = task.to_dict()
+    for attempt in range(_WEBHOOK_MAX_RETRIES):
+        try:
+            resp = httpx.post(
+                task.callback_url,
+                json=payload,
+                timeout=_WEBHOOK_TIMEOUT,
+                headers={"Content-Type": "application/json"},
+            )
+            if resp.status_code < 400:
+                logger.info("Webhook delivered: task=%s url=%s status=%d", task.task_id, task.callback_url, resp.status_code)
+                return
+            logger.warning(
+                "Webhook rejected: task=%s url=%s status=%d attempt=%d/%d",
+                task.task_id, task.callback_url, resp.status_code, attempt + 1, _WEBHOOK_MAX_RETRIES,
+            )
+        except Exception as e:
+            logger.warning(
+                "Webhook failed: task=%s url=%s error=%s attempt=%d/%d",
+                task.task_id, task.callback_url, e, attempt + 1, _WEBHOOK_MAX_RETRIES,
+            )
+
+        if attempt < _WEBHOOK_MAX_RETRIES - 1:
+            time.sleep(_WEBHOOK_RETRY_DELAYS[attempt])
+
+    logger.error("Webhook exhausted retries: task=%s url=%s", task.task_id, task.callback_url)
 
 
 class TaskManager:
@@ -88,6 +130,7 @@ class TaskManager:
         params: dict[str, Any],
         executor_fn: Callable[[Task, dict[str, Any]], dict],
         request_id: Optional[str] = None,
+        callback_url: Optional[str] = None,
         gpu: bool = True,
     ) -> str:
         task_id = uuid.uuid4().hex[:16]
@@ -95,6 +138,7 @@ class TaskManager:
             task_id=task_id,
             task_type=task_type,
             request_id=request_id,
+            callback_url=callback_url,
         )
         with self._lock:
             self._tasks[task_id] = task
@@ -152,6 +196,11 @@ class TaskManager:
                 task.error = str(e)
             finally:
                 task.updated_at = time.time()
+                # Fire webhook callback (best-effort, non-blocking to queue)
+                if task.callback_url and task.status in ("completed", "failed", "cancelled"):
+                    threading.Thread(
+                        target=_fire_webhook, args=(task,), daemon=True, name=f"webhook-{task.task_id}"
+                    ).start()
 
 
 def _make_progress_callback(task: Task):

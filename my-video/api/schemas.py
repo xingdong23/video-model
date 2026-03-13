@@ -26,6 +26,7 @@ class VoiceSynthesizeRequest(BaseModel):
     text: str
     speaker: str
     speed: float = 1.0
+    callback_url: Optional[str] = None
 
 
 class VoiceZeroShotRequest(BaseModel):
@@ -58,6 +59,7 @@ class DigitalHumanGenerateRequest(BaseModel):
     compress_inference: bool = False
     beautify_teeth: bool = False
     runtime: Optional[str] = None
+    callback_url: Optional[str] = None
 
 
 # ── Subtitle ──
@@ -77,6 +79,7 @@ class SubtitleGenerateSrtRequest(BaseModel):
     correction_api_base: Optional[str] = None
     correction_model_name: Optional[str] = None
     correction_timeout: Optional[int] = None
+    callback_url: Optional[str] = None
 
 
 class SubtitleCorrectRequest(BaseModel):
@@ -99,6 +102,7 @@ class SubtitleBurnRequest(BaseModel):
     outline: int = 1
     wrap_style: int = 2
     bottom_margin: int = 30
+    callback_url: Optional[str] = None
 
 
 # ── BGM ──
@@ -113,6 +117,7 @@ class BgmMixRequest(BaseModel):
     original_volume: float = 1.0
     loop_bgm: bool = True
     fade_out_seconds: float = 0.0
+    callback_url: Optional[str] = None
 
 
 class BgmTrackItem(BaseModel):
@@ -137,10 +142,12 @@ class RewriteInstructionRequest(BaseModel):
 
 class DouyinTranscribeRequest(BaseModel):
     share_link: str
+    callback_url: Optional[str] = None
 
 
 class DouyinDownloadRequest(BaseModel):
     share_link: str
+    callback_url: Optional[str] = None
 
 
 # ── Workflow (grouped config) ──

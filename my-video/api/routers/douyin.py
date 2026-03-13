@@ -105,6 +105,7 @@ async def transcribe(req: DouyinTranscribeRequest, request: Request):
         params={"share_link": share_link},
         executor_fn=_execute_transcribe,
         request_id=request.headers.get("X-Request-ID"),
+        callback_url=req.callback_url,
         gpu=False,
     )
     return success_response({"task_id": task_id})
@@ -150,6 +151,7 @@ async def download(req: DouyinDownloadRequest, request: Request):
         params={"share_link": share_link},
         executor_fn=_execute_download,
         request_id=request.headers.get("X-Request-ID"),
+        callback_url=req.callback_url,
         gpu=False,
     )
     return success_response({"task_id": task_id})

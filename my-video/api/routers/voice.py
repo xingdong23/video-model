@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
+from typing import Optional
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import StreamingResponse
@@ -58,6 +59,7 @@ async def synthesize(req: VoiceSynthesizeRequest, request: Request):
         params={"text": req.text, "speaker": req.speaker, "speed": req.speed},
         executor_fn=_execute_synthesize,
         request_id=request.headers.get("X-Request-ID"),
+        callback_url=req.callback_url,
         gpu=True,
     )
     return success_response({"task_id": task_id})
@@ -113,6 +115,7 @@ async def zero_shot(
     prompt_text: str = Form(...),
     speed: float = Form(1.0),
     prompt_wav: UploadFile = File(...),
+    callback_url: Optional[str] = Form(None),
     request: Request = None,
 ):
     em = get_engine_manager()
@@ -134,6 +137,7 @@ async def zero_shot(
         },
         executor_fn=_execute_zero_shot,
         request_id=request.headers.get("X-Request-ID") if request else None,
+        callback_url=callback_url,
         gpu=True,
     )
     return success_response({"task_id": task_id})

@@ -44,19 +44,58 @@ Base URL: `http://<host>:<port>`
 耗时操作（语音合成、数字人生成、字幕识别等）采用 **异步任务** 模式：
 
 1. 提交请求 → 立即返回 `202` + `task_id`
-2. 轮询 `GET /api/v1/tasks/{task_id}` 获取进度
-3. 任务完成后 `result` 字段包含原同步接口的返回结构
+2. 通过以下三种方式之一获取结果
+
+#### 方式一：Webhook 回调（推荐，server-to-server）
+
+提交任务时带 `callback_url`，任务完成/失败后 my-video 会 POST 到该 URL：
 
 ```
-提交请求 ──→ 202 { task_id }
-                │
-                ▼
-        GET /tasks/{task_id}
-                │
-    ┌───────────┼───────────┐
-    queued    processing   completed / failed
-              (progress%)   (result / error)
+Web项目                            my-video (GPU)
+  │                                    │
+  │  POST /digital-human/generate      │
+  │  { ..., callback_url: "http://     │
+  │    localhost:3000/webhook/task" }   │
+  │───────────────────────────────────→ │
+  │       202 { task_id }              │
+  │←─────────────────────────────────── │
+  │                                    │
+  │       (GPU 推理 3~10 分钟...)       │
+  │                                    │
+  │       POST callback_url            │
+  │  { task_id, status, result, ... }  │
+  │←─────────────────────────────────── │
 ```
+
+- 回调重试策略：最多 3 次，间隔 1s / 3s / 10s
+- 回调在独立线程执行，不阻塞 worker
+- 回调失败不影响任务状态，Web 项目可降级到轮询
+
+#### 方式二：SSE 实时推送（适合前端进度条）
+
+```
+GET /api/v1/tasks/{task_id}/stream
+```
+
+返回 `text/event-stream`，每秒推送一次状态变化：
+
+```
+event: progress
+data: {"task_id":"...","status":"processing","progress":55,"message":"推理中 147/267"}
+
+event: completed
+data: {"task_id":"...","status":"completed","result":{...}}
+```
+
+连接在任务到达终态后自动关闭。
+
+#### 方式三：轮询（最简单）
+
+```
+GET /api/v1/tasks/{task_id}
+```
+
+建议间隔 2-5 秒，检查 `status` 是否为终态（completed / failed / cancelled）。
 
 ---
 
@@ -112,6 +151,100 @@ Base URL: `http://<host>:<port>`
 
 **失败响应** (409)：任务已在执行中或已完成，无法取消。
 
+### GET /api/v1/tasks/{task_id}/stream
+
+SSE 实时推送任务进度。连接建立后每秒检查状态变化并推送事件，到达终态自动关闭。
+
+**事件类型**：
+
+| event | 说明 |
+|-------|------|
+| `progress` | 进度更新，`data` 中包含 progress/step/message |
+| `completed` | 任务完成，`data.result` 包含结果 |
+| `failed` | 任务失败，`data.error` 包含错误信息 |
+| `cancelled` | 任务已取消 |
+| `error` | 任务不存在 |
+
+**前端使用示例**：
+
+```javascript
+const es = new EventSource("/api/v1/tasks/abc123/stream");
+
+es.addEventListener("progress", (e) => {
+  const data = JSON.parse(e.data);
+  console.log(`[${data.progress}%] ${data.message}`);
+});
+
+es.addEventListener("completed", (e) => {
+  const data = JSON.parse(e.data);
+  console.log("完成:", data.result);
+  es.close();
+});
+
+es.addEventListener("failed", (e) => {
+  const data = JSON.parse(e.data);
+  console.error("失败:", data.error);
+  es.close();
+});
+```
+
+### Webhook 回调
+
+所有异步接口的请求体均支持可选字段 `callback_url`。任务到达终态后，my-video 会向该 URL 发送 POST 请求：
+
+**回调请求**：
+
+```http
+POST {callback_url}
+Content-Type: application/json
+
+{
+  "task_id": "a1b2c3d4e5f67890",
+  "task_type": "digital_human",
+  "status": "completed",
+  "step": "completed",
+  "progress": 100,
+  "message": "完成",
+  "result": {
+    "file_id": "xxx",
+    "download_url": "/api/v1/files/xxx",
+    "elapsed_seconds": 180.5
+  },
+  "error": null,
+  "created_at": 1710352800.0,
+  "updated_at": 1710352980.0,
+  "request_id": "order-12345"
+}
+```
+
+**重试策略**：
+
+- 最多 3 次，间隔 1s → 3s → 10s
+- HTTP 状态码 < 400 视为成功
+- 回调在独立线程执行，不阻塞 GPU/CPU worker
+- 所有重试失败后仅记录日志，不影响任务状态
+
+**Web 项目回调接口示例** (接收端)：
+
+```python
+# Web 项目（如 Flask / Django / FastAPI）
+@app.post("/webhook/my-video")
+async def handle_callback(payload: dict):
+    task_id = payload["task_id"]
+    status = payload["status"]
+    request_id = payload["request_id"]  # 对应业务订单号
+
+    if status == "completed":
+        file_id = payload["result"]["file_id"]
+        download_url = f"http://gpu-server:8000{payload['result']['download_url']}"
+        # 更新数据库、通知用户...
+    elif status == "failed":
+        error = payload["error"]
+        # 记录失败、退还积分...
+
+    return {"ok": True}
+```
+
 ---
 
 ## 数字人
@@ -147,6 +280,7 @@ Base URL: `http://<host>:<port>`
 | `compress_inference` | bool | N | false | 是否压缩推理 |
 | `beautify_teeth` | bool | N | false | 是否美化牙齿 |
 | `runtime` | string | N | null | 运行时 (auto/cuda/cpu) |
+| `callback_url` | string | N | null | 任务完成后回调的 URL |
 
 **响应** (202)：
 
@@ -211,6 +345,7 @@ Base URL: `http://<host>:<port>`
 | `text` | string | Y | - | 要合成的文本 |
 | `speaker` | string | Y | - | 说话人名称 |
 | `speed` | float | N | 1.0 | 语速倍率 |
+| `callback_url` | string | N | null | 任务完成后回调的 URL |
 
 **任务完成后 result**：
 
@@ -239,6 +374,7 @@ Base URL: `http://<host>:<port>`
 | `prompt_text` | string | Y | 参考音频对应文本 |
 | `speed` | float | N | 语速倍率，默认 1.0 |
 | `prompt_wav` | file | Y | 参考音频文件 |
+| `callback_url` | string | N | 任务完成后回调的 URL |
 
 **任务完成后 result**：
 
@@ -286,6 +422,7 @@ Base URL: `http://<host>:<port>`
 | `correction_api_base` | string | N | null | LLM API Base URL |
 | `correction_model_name` | string | N | null | LLM 模型名 |
 | `correction_timeout` | int | N | null | 超时秒数 |
+| `callback_url` | string | N | null | 任务完成后回调的 URL |
 
 **任务完成后 result**：
 
@@ -332,6 +469,7 @@ LLM 纠错已有字幕。**同步**（调用外部 LLM API）。
 | `outline` | int | N | 1 | 描边宽度 |
 | `wrap_style` | int | N | 2 | 换行模式 |
 | `bottom_margin` | int | N | 30 | 底部边距 |
+| `callback_url` | string | N | null | 任务完成后回调的 URL |
 
 **任务完成后 result**：
 
@@ -377,6 +515,7 @@ LLM 纠错已有字幕。**同步**（调用外部 LLM API）。
 | `original_volume` | float | N | 1.0 | 原始音量 |
 | `loop_bgm` | bool | N | true | BGM 循环 |
 | `fade_out_seconds` | float | N | 0.0 | 淡出时长 |
+| `callback_url` | string | N | null | 任务完成后回调的 URL |
 
 **任务完成后 result**：
 
@@ -423,6 +562,7 @@ LLM 纠错已有字幕。**同步**（调用外部 LLM API）。
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `share_link` | string | Y | 抖音分享链接 |
+| `callback_url` | string | N | 任务完成后回调的 URL |
 
 **任务完成后 result**：
 
@@ -442,6 +582,7 @@ LLM 纠错已有字幕。**同步**（调用外部 LLM API）。
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `share_link` | string | Y | 抖音分享链接 |
+| `callback_url` | string | N | 任务完成后回调的 URL |
 
 **任务完成后 result**：
 
@@ -639,39 +780,102 @@ LLM 纠错已有字幕。**同步**（调用外部 LLM API）。
 
 ## Web 项目对接示例
 
-```python
-import httpx, time
+### 方式一：Webhook 回调（推荐）
 
-API = "http://localhost:8000"
+**发送端**（Web 项目提交任务）：
+
+```python
+import httpx
+
+GPU_API = "http://gpu-server:8000"
 HEADERS = {"X-API-Key": "your-key", "X-Request-ID": "order-12345"}
 
 # 1. 上传音频
 with open("audio.wav", "rb") as f:
-    r = httpx.post(f"{API}/api/v1/files/upload", files={"file": f}, headers=HEADERS)
+    r = httpx.post(f"{GPU_API}/api/v1/files/upload", files={"file": f}, headers=HEADERS)
 audio_file_id = r.json()["data"]["file_id"]
 
-# 2. 提交数字人生成
-r = httpx.post(f"{API}/api/v1/digital-human/generate", json={
+# 2. 提交数字人生成，带 callback_url
+r = httpx.post(f"{GPU_API}/api/v1/digital-human/generate", json={
     "audio_file_id": audio_file_id,
     "face": "anchor1.mp4",
+    "callback_url": "http://localhost:3000/webhook/my-video",
 }, headers=HEADERS)
 task_id = r.json()["data"]["task_id"]
+# 记录 task_id 到数据库，关联业务订单
+```
 
-# 3. 轮询进度
+**接收端**（Web 项目回调接口）：
+
+```python
+@app.post("/webhook/my-video")
+async def handle_callback(payload: dict):
+    task_id = payload["task_id"]
+    status = payload["status"]
+    request_id = payload["request_id"]  # 对应业务订单号
+
+    if status == "completed":
+        file_id = payload["result"]["file_id"]
+        download_url = f"http://gpu-server:8000{payload['result']['download_url']}"
+        # 更新数据库、通知前端、扣减积分...
+    elif status == "failed":
+        error = payload["error"]
+        # 记录失败、退还积分...
+
+    return {"ok": True}
+```
+
+### 方式二：轮询（简单场景 / 回调降级）
+
+```python
+import httpx, time
+
+GPU_API = "http://gpu-server:8000"
+HEADERS = {"X-API-Key": "your-key", "X-Request-ID": "order-12345"}
+
+# 1. 上传 + 提交（同上，省略 callback_url）
+task_id = "..."
+
+# 2. 轮询进度
 while True:
-    r = httpx.get(f"{API}/api/v1/tasks/{task_id}", headers=HEADERS)
+    r = httpx.get(f"{GPU_API}/api/v1/tasks/{task_id}", headers=HEADERS)
     task = r.json()["data"]
     print(f"[{task['progress']}%] {task['message']}")
     if task["status"] in ("completed", "failed", "cancelled"):
         break
     time.sleep(2)
 
-# 4. 获取结果
+# 3. 获取结果
 if task["status"] == "completed":
     file_id = task["result"]["file_id"]
-    video = httpx.get(f"{API}/api/v1/files/{file_id}", headers=HEADERS)
+    video = httpx.get(f"{GPU_API}/api/v1/files/{file_id}", headers=HEADERS)
     with open("output.mp4", "wb") as f:
         f.write(video.content)
+```
+
+### 方式三：SSE 实时进度（前端进度条）
+
+```javascript
+// 前端直接连 GPU 服务，或通过 Web 项目代理
+const taskId = "a1b2c3d4e5f67890";
+const es = new EventSource(`http://gpu-server:8000/api/v1/tasks/${taskId}/stream`);
+
+es.addEventListener("progress", (e) => {
+  const { progress, message } = JSON.parse(e.data);
+  updateProgressBar(progress, message);
+});
+
+es.addEventListener("completed", (e) => {
+  const { result } = JSON.parse(e.data);
+  showVideo(result.download_url);
+  es.close();
+});
+
+es.addEventListener("failed", (e) => {
+  const { error } = JSON.parse(e.data);
+  showError(error);
+  es.close();
+});
 ```
 
 ---
