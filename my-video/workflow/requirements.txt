@@ -1,0 +1,3 @@
+-r ../voice/requirements.txt
+-r ../digital_human/requirements.txt
+-r ../subtitle/requirements.txt

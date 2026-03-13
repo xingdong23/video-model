@@ -1,0 +1,45 @@
+# ── Models (large binary files) ──
+voice/models/
+digital_human/models/
+douyin/models/
+subtitle/models/
+
+# ── Output / generated files ──
+*/output/
+api_storage/
+
+# ── Downloads ──
+douyin/downloads/
+
+# ── Python cache ──
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+
+# ── macOS ──
+.DS_Store
+._*
+
+# ── IDE ──
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ── Env ──
+.env
+*.log
+nohup.out
+
+# ── Large binary files ──
+*.tar.gz
+*.zip
+*.rar
+
+# ── Temporary ──
+*.tmp
+.cache/

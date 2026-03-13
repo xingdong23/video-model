@@ -1,0 +1,7 @@
+# Top level
+my-video.tar.gz
+*.tar.gz
+
+# macOS
+.DS_Store
+._*

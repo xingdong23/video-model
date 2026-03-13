@@ -1,0 +1,12 @@
+opencv-python
+tqdm
+numpy
+transformers
+Pillow
+soundfile
+einops
+kornia
+insightface
+onnxruntime
+accelerate
+torch

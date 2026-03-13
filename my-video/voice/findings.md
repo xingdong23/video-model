@@ -1,0 +1,26 @@
+# Findings
+
+- 原页面“生成音频”按钮最终调用的是 `utils.voice_processor.handle_audio_creation`。
+- 语音合成本体不是前端实现，而是本地 `http://localhost:9880/tts_to_audio` 服务。
+- 服务端核心在 `cosyvoice/api.py`，加载 `CosyVoice2-0.5B`，实际调用 `cosyvoice.inference_sft(text, speaker, stream=False, speed=speed)`。
+- 自定义音色来自 `cosyvoice/voices/*.pt`。
+- 从可见的 `cosyvoice/cosyvoice/cli/cosyvoice-amd.py` 看，自定义 `.pt` 存的是 speaker embeddings / prompt tokens / prompt speech features，不是原始音频。
+- 完整模型资源位于 `cosyvoice/pretrained_models/CosyVoice2-0.5B`，体积较大。
+- 为了做到目录自举，已将 `CosyVoice2-0.5B` 复制到 `my-video/voice/models/CosyVoice2-0.5B`。
+- `my-video/voice` 现在提供三层入口：`voice.engine`、`python -m voice.cli`、`python -m voice.cli serve`。
+- `GET /speakers_list` 和 `POST /tts_to_audio` 已按独立模块实测通过。
+- CosyVoice 底层已经具备 `inference_zero_shot` 能力，只是之前的独立包装没有把它暴露出来。
+- 自定义 `.pt` 音色可以直接由 `frontend_zero_shot()` 生成的特征子集固化得到，核心字段包括 embedding、prompt speech token、prompt speech feature、prompt text。
+- 为了避免 vendored `inference_zero_shot()` 额外写出 `output.pt`，独立模块里直接复用了 `frontend_zero_shot()` 和 `model.tts()`。
+- 新增的 HTTP 路由可直接接收上传文件：
+  - `POST /inference_zero_shot`
+  - `POST /voices/export_pt`
+- `voice.__init__` 和 `voice.cli` 之前会在导入期直接触发 `engine -> cosyvoice -> torchaudio`，导致即使只是 `python -m voice.cli --help` 也会被 native 依赖阻塞；现已改为懒加载。
+- HTTP 接口里的 `speed` 参数如果直接 `float(...)`，非法值会抛 500；现已改成返回 `400 {"error": "speed must be a number"}`。
+- 复制目录后不应复用旧 `.venv`；虚拟环境脚本 shebang 会保留原路径。独立运行应在新目录内重建 `.venv`。
+- 本地 `my-video/.venv` 曾出现 `torch 2.8.0` 与 `torchaudio 2.3.1` 不匹配，导致 `libtorchaudio` 符号错误；已修回 `2.3.1 / 2.3.1`。
+- 兼容性改动集中在 vendored 代码：
+  - `vendor/cosyvoice/cli/cosyvoice.py`：去掉 `modelscope` 强依赖、支持自定义音色目录
+  - `vendor/cosyvoice/cli/frontend.py`：`ttsfrd`/`WeTextProcessing` 不可用时回退到 identity normalizer
+  - `vendor/third_party/Matcha-TTS/matcha/utils/*`：去掉训练框架对推理启动的阻塞
+  - `vendor/cosyvoice/dataset/processor.py`：将 `pyworld` 改为按需导入

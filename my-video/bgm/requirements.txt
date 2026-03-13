@@ -1,0 +1,2 @@
+# The standalone bgm module only uses the Python standard library.
+# Install system ffmpeg and ffprobe, or pass --ffmpeg-bin / --ffprobe-bin.

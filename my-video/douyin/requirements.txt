@@ -1,0 +1,5 @@
+requests
+tqdm
+faster-whisper
+moviepy
+opencc-python-reimplemented

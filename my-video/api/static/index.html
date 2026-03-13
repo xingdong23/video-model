@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>my-video - AI 视频生产线</title>
+<style>
+:root {
+  --bg: #0c0e14; --bg2: #141620; --bg3: #1a1d2e; --border: #262a3d;
+  --text: #d0d4e0; --text2: #8890a8; --white: #f0f2f8;
+  --purple: #7c5cfc; --purple2: #6344e8; --purple-bg: rgba(124,92,252,.12);
+  --green: #34d399; --green-bg: rgba(52,211,153,.1);
+  --red: #f87171; --red-bg: rgba(248,113,113,.1);
+  --blue: #60a5fa; --yellow: #fbbf24;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+/* Header */
+.header { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 12px 32px; display: flex; align-items: center; gap: 16px; position: sticky; top: 0; z-index: 100; }
+.header .logo { font-size: 22px; font-weight: 700; color: var(--white); letter-spacing: -0.5px; }
+.header .logo span { color: var(--purple); }
+.header .badge { font-size: 11px; padding: 3px 10px; border-radius: 10px; font-weight: 500; }
+.badge-online { background: var(--green-bg); color: var(--green); }
+.badge-offline { background: var(--red-bg); color: var(--red); }
+.header .gpu-tag { margin-left: auto; font-size: 12px; color: var(--text2); background: var(--bg3); padding: 4px 12px; border-radius: 6px; }
+
+/* Steps container */
+.pipeline { padding: 24px 32px 60px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
+@media (max-width: 1400px) { .pipeline { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 900px) { .pipeline { grid-template-columns: 1fr; } }
+
+/* Step card */
+.step { background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.step-header { padding: 14px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
+.step-num { width: 28px; height: 28px; border-radius: 50%; background: var(--purple); color: #fff; font-size: 14px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.step-num.done { background: var(--green); }
+.step-title { font-size: 16px; font-weight: 600; color: var(--white); }
+.step-status { margin-left: auto; font-size: 11px; padding: 2px 8px; border-radius: 8px; }
+.step-body { padding: 16px 20px; }
+
+/* Form elements */
+.fg { margin-bottom: 14px; }
+.fg:last-child { margin-bottom: 0; }
+.fg label { display: block; font-size: 12px; color: var(--text2); margin-bottom: 5px; font-weight: 500; }
+.fg input, .fg textarea, .fg select {
+  width: 100%; padding: 9px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text); font-size: 13px; outline: none; transition: border .15s; font-family: inherit;
+}
+.fg input:focus, .fg textarea:focus, .fg select:focus { border-color: var(--purple); }
+.fg textarea { resize: vertical; min-height: 90px; }
+.fg .hint { font-size: 11px; color: var(--text2); margin-top: 3px; opacity: .7; }
+.fg-row { display: flex; gap: 10px; }
+.fg-row .fg { flex: 1; }
+.fg input[type="file"] { padding: 7px; }
+.fg input[type="color"] { padding: 3px; height: 38px; cursor: pointer; }
+.fg input[type="number"] { -moz-appearance: textfield; }
+
+.cb { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; cursor: pointer; }
+.cb input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--purple); cursor: pointer; }
+.cb label { font-size: 13px; color: var(--text); cursor: pointer; margin: 0; }
+
+.radio-row { display: flex; gap: 16px; margin-bottom: 12px; }
+.radio-row label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text); cursor: pointer; }
+.radio-row input[type="radio"] { accent-color: var(--purple); cursor: pointer; }
+
+/* Buttons */
+.btn {
+  padding: 10px 24px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600;
+  transition: all .2s; display: inline-flex; align-items: center; gap: 8px; width: 100%;
+  justify-content: center; letter-spacing: 0.3px;
+}
+.btn-main { background: var(--purple); color: #fff; }
+.btn-main:hover { background: var(--purple2); transform: translateY(-1px); box-shadow: 0 4px 15px rgba(124,92,252,.3); }
+.btn-main:disabled { background: #3d3570; color: #8878c0; cursor: not-allowed; transform: none; box-shadow: none; }
+.btn-sm { padding: 6px 14px; font-size: 12px; width: auto; }
+.btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
+.btn-outline:hover { border-color: var(--purple); color: var(--purple); }
+
+/* Spinner */
+.spinner { display: inline-block; width: 16px; height: 16px; border: 2.5px solid rgba(255,255,255,.3); border-top-color: #fff; border-radius: 50%; animation: spin .6s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Result & preview */
+.result { margin-top: 14px; padding: 10px 14px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; font-size: 12px; font-family: "SF Mono", Monaco, monospace; max-height: 200px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; display: none; }
+.result.ok { border-color: #166534; }
+.result.err { border-color: #7f1d1d; color: var(--red); }
+.result.show { display: block; }
+.preview { margin-top: 12px; }
+.preview audio { width: 100%; border-radius: 8px; }
+.preview video { width: 100%; border-radius: 8px; max-height: 360px; background: #000; }
+.file-tag { display: inline-block; padding: 3px 10px; background: var(--purple-bg); color: var(--purple); border-radius: 6px; font-size: 11px; font-weight: 600; margin-top: 6px; cursor: pointer; user-select: all; }
+.dl-link { color: var(--blue); text-decoration: none; font-size: 12px; }
+.dl-link:hover { text-decoration: underline; }
+
+/* Divider */
+.divider { height: 1px; background: var(--border); margin: 14px 0; }
+
+/* Upload area */
+.upload-area {
+  border: 2px dashed var(--border); border-radius: 10px; padding: 20px; text-align: center;
+  cursor: pointer; transition: all .2s; position: relative;
+}
+.upload-area:hover { border-color: var(--purple); background: var(--purple-bg); }
+.upload-area.has-file { border-color: var(--green); background: var(--green-bg); }
+.upload-area input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.upload-area .icon { font-size: 28px; margin-bottom: 6px; }
+.upload-area .text { font-size: 13px; color: var(--text2); }
+.upload-area .filename { font-size: 13px; color: var(--green); font-weight: 600; }
+
+/* Status log at bottom */
+.log-bar { position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg2); border-top: 1px solid var(--border); padding: 6px 32px; font-size: 12px; color: var(--text2); display: flex; align-items: center; gap: 12px; z-index: 100; }
+.log-bar .dot { width: 6px; height: 6px; border-radius: 50%; }
+.log-bar .dot.on { background: var(--green); }
+.log-bar .dot.off { background: var(--red); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">my-<span>video</span></div>
+  <span class="badge" id="statusBadge">--</span>
+  <span class="gpu-tag" id="gpuInfo">GPU: --</span>
+</div>
+
+<div class="pipeline">
+
+  <!-- ==================== STEP 1: 抖音视频处理 ==================== -->
+  <div class="step" id="step1">
+    <div class="step-header">
+      <div class="step-num" id="sn1">1</div>
+      <div class="step-title">抖音视频处理</div>
+    </div>
+    <div class="step-body">
+      <div class="fg">
+        <label>抖音分享链接</label>
+        <input type="text" id="dy-link" placeholder="粘贴抖音分享链接...">
+      </div>
+      <div class="fg-row">
+        <button class="btn btn-main" id="btn-dy-extract" onclick="douyinExtract()">提取文案</button>
+      </div>
+      <div class="result" id="dy-res"></div>
+      <div class="preview" id="dy-preview"></div>
+    </div>
+  </div>
+
+  <!-- ==================== STEP 2: 文案生成 ==================== -->
+  <div class="step" id="step2">
+    <div class="step-header">
+      <div class="step-num" id="sn2">2</div>
+      <div class="step-title">文案生成</div>
+    </div>
+    <div class="step-body">
+      <div class="fg">
+        <label>视频文案</label>
+        <textarea id="script-text" placeholder="从抖音提取后自动填入，也可以手动输入或修改..." rows="6"></textarea>
+        <div class="hint">提取抖音文案后会自动填入此处，你可以手动修改</div>
+      </div>
+      <div class="divider"></div>
+      <div class="fg">
+        <label>仿写模式</label>
+        <div class="radio-row">
+          <label><input type="radio" name="rewrite-mode" value="none" checked> 不改写</label>
+          <label><input type="radio" name="rewrite-mode" value="auto"> 自动仿写</label>
+          <label><input type="radio" name="rewrite-mode" value="custom"> 自定义指令</label>
+        </div>
+      </div>
+      <div class="fg" id="rewrite-instruction-group" style="display:none">
+        <label>改写指令</label>
+        <textarea id="rewrite-instruction" placeholder="例如：改为更加口语化的风格..." rows="2"></textarea>
+      </div>
+      <button class="btn btn-main" id="btn-rewrite" onclick="rewriteScript()">执行改写</button>
+      <div class="result" id="rewrite-res"></div>
+    </div>
+  </div>
+
+  <!-- ==================== STEP 3: 音频生成 ==================== -->
+  <div class="step" id="step3">
+    <div class="step-header">
+      <div class="step-num" id="sn3">3</div>
+      <div class="step-title">音频生成</div>
+    </div>
+    <div class="step-body">
+      <div class="fg-row">
+        <div class="fg">
+          <label>选择音色</label>
+          <div style="display:flex;gap:6px">
+            <select id="v-speaker" style="flex:1"><option value="">加载中...</option></select>
+            <button class="btn btn-outline btn-sm" onclick="refreshSpeakers()">刷新</button>
+          </div>
+        </div>
+        <div class="fg">
+          <label>语速调节</label>
+          <input type="number" id="v-speed" value="1.0" min="0.5" max="2.0" step="0.1">
+          <div class="hint">推荐范围 0.8-1.2</div>
+        </div>
+      </div>
+      <div class="divider"></div>
+      <div class="fg">
+        <label>零样本克隆（可选）</label>
+        <div class="hint" style="margin-bottom:8px">上传参考音频可以克隆该音色，留空则使用上方音色</div>
+      </div>
+      <div class="fg">
+        <label>参考音频</label>
+        <input type="file" id="v-prompt-audio" accept="audio/*">
+      </div>
+      <div class="fg">
+        <label>参考音频文本</label>
+        <input type="text" id="v-prompt-text" placeholder="参考音频里说的话（克隆时必填）">
+      </div>
+      <button class="btn btn-main" id="btn-tts" onclick="generateAudio()">生成音频</button>
+      <div class="result" id="tts-res"></div>
+      <div class="preview" id="tts-preview"></div>
+    </div>
+  </div>
+
+  <!-- ==================== STEP 4: 视频生成 ==================== -->
+  <div class="step" id="step4">
+    <div class="step-header">
+      <div class="step-num" id="sn4">4</div>
+      <div class="step-title">视频生成</div>
+    </div>
+    <div class="step-body">
+      <div class="fg">
+        <label>选择数字人模型</label>
+        <div style="display:flex;gap:6px">
+          <select id="dh-face" style="flex:1"><option value="">加载中...</option></select>
+          <button class="btn btn-outline btn-sm" onclick="refreshFaces()">刷新</button>
+        </div>
+      </div>
+      <div class="divider"></div>
+      <div class="fg">
+        <label>上传参考视频（可选，替代数字人模型）</label>
+        <div class="upload-area" id="upload-video-area">
+          <input type="file" id="upload-video-file" accept="video/*" onchange="onVideoFileSelected(this)">
+          <div class="icon">+</div>
+          <div class="text">点击或拖拽上传视频文件</div>
+        </div>
+        <div class="hint">支持 mp4/mov/avi，上传后将替代数字人模型</div>
+      </div>
+      <div class="fg" id="upload-video-info" style="display:none">
+        <div class="file-tag" id="upload-video-tag"></div>
+      </div>
+      <div class="divider"></div>
+      <div class="fg">
+        <label>高级参数</label>
+      </div>
+      <div class="fg-row">
+        <div class="fg">
+          <label>Batch Size</label>
+          <input type="number" id="dh-batch" value="4" min="1" max="32">
+        </div>
+        <div class="fg">
+          <label>音频 file_id（可选，不填自动使用上一步）</label>
+          <input type="text" id="dh-audio-override" placeholder="自动使用步骤3的结果">
+        </div>
+      </div>
+      <button class="btn btn-main" id="btn-dh" onclick="generateVideo()">生成数字人视频</button>
+      <div class="hint" style="margin-top:6px">通常需要 30-60 秒</div>
+      <div class="result" id="dh-res"></div>
+      <div class="preview" id="dh-preview"></div>
+    </div>
+  </div>
+
+  <!-- ==================== STEP 5: 字幕生成 ==================== -->
+  <div class="step" id="step5">
+    <div class="step-header">
+      <div class="step-num" id="sn5">5</div>
+      <div class="step-title">字幕生成</div>
+    </div>
+    <div class="step-body">
+      <div class="fg-row">
+        <div class="fg">
+          <label>选择字体</label>
+          <select id="sub-font">
+            <option value="">默认字体</option>
+            <option value="AlimamaShanHeiTi">阿里妈妈善黑体</option>
+          </select>
+        </div>
+        <div class="fg">
+          <label>选择描边粗细</label>
+          <select id="sub-outline">
+            <option value="1">1 (细)</option>
+            <option value="2" selected>2 (正常)</option>
+            <option value="3">3 (粗)</option>
+          </select>
+        </div>
+      </div>
+      <div class="fg-row">
+        <div class="fg">
+          <label>字体大小</label>
+          <input type="number" id="sub-size" value="24" min="8" max="72">
+        </div>
+        <div class="fg">
+          <label>描边距底 (px)</label>
+          <input type="number" id="sub-margin" value="30" min="0" max="200">
+        </div>
+      </div>
+      <div class="fg-row">
+        <div class="fg">
+          <label>字体颜色</label>
+          <input type="color" id="sub-color" value="#FFFFFF">
+        </div>
+        <div class="fg">
+          <label>描边颜色</label>
+          <input type="color" id="sub-outline-color" value="#000000">
+        </div>
+      </div>
+      <button class="btn btn-main" id="btn-sub" onclick="generateSubtitle()">生成字幕</button>
+      <div class="result" id="sub-res"></div>
+      <div class="fg" id="sub-srt-group" style="display:none;margin-top:12px">
+        <label>字幕内容</label>
+        <select id="sub-srt-type" style="margin-bottom:6px">
+          <option value="preview">字幕预览</option>
+        </select>
+      </div>
+      <div class="divider" id="sub-divider" style="display:none"></div>
+      <button class="btn btn-main" id="btn-burn" onclick="burnSubtitle()" style="display:none">烧录字幕</button>
+      <div class="result" id="burn-res"></div>
+      <div class="preview" id="burn-preview"></div>
+    </div>
+  </div>
+
+  <!-- ==================== STEP 6: 背景音乐 ==================== -->
+  <div class="step" id="step6">
+    <div class="step-header">
+      <div class="step-num" id="sn6">6</div>
+      <div class="step-title">背景音乐生成</div>
+    </div>
+    <div class="step-body">
+      <div class="fg">
+        <label>背景音乐音量</label>
+        <input type="number" id="bgm-vol" value="0.2" min="0" max="1" step="0.05">
+        <div class="hint">推荐范围 0.2-0.5</div>
+      </div>
+      <div class="fg-row">
+        <div class="fg">
+          <label>BGM 曲目</label>
+          <div style="display:flex;gap:6px">
+            <select id="bgm-track" style="flex:1"><option value="">加载中...</option></select>
+            <button class="btn btn-outline btn-sm" onclick="refreshTracks()">刷新</button>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;gap:16px;margin-bottom:14px">
+        <div class="cb">
+          <input type="checkbox" id="bgm-custom-check">
+          <label for="bgm-custom-check">自定义添加BGM</label>
+        </div>
+        <div class="cb">
+          <input type="checkbox" id="bgm-none-check">
+          <label for="bgm-none-check">不使用BGM</label>
+        </div>
+      </div>
+      <div class="fg-row">
+        <div class="fg">
+          <label>淡出秒数</label>
+          <input type="number" id="bgm-fade" value="2.0" min="0" step="0.5">
+        </div>
+        <div class="fg">
+          <label>原音量</label>
+          <input type="number" id="bgm-orig" value="1.0" min="0" max="1" step="0.05">
+        </div>
+      </div>
+      <button class="btn btn-main" id="btn-bgm" onclick="addBgm()">自动生成BGM</button>
+      <div class="result" id="bgm-res"></div>
+      <div class="preview" id="bgm-preview"></div>
+    </div>
+  </div>
+
+</div>
+
+<div class="log-bar">
+  <span class="dot" id="logDot"></span>
+  <span id="logText">就绪</span>
+</div>
+
+<script>
+const API = window.location.origin;
+
+// ── Global state (file IDs passed between steps) ──
+const state = {
+  scriptText: '',       // Step 1/2 output
+  audioFileId: null,    // Step 3 output
+  videoFileId: null,    // Step 4 output (digital human video)
+  uploadVideoFileId: null, // Step 4 uploaded custom video
+  srtFileId: null,      // Step 5 SRT output
+  burnedVideoFileId: null, // Step 5 burned video
+  finalVideoFileId: null,  // Current latest video file_id
+};
+
+// ── Utils ──
+function log(msg) { document.getElementById('logText').textContent = msg; }
+function $(id) { return document.getElementById(id); }
+
+function showRes(id, data, isErr) {
+  const el = $(id);
+  el.className = 'result show ' + (isErr ? 'err' : 'ok');
+  el.textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+}
+
+function markDone(n) { $('sn' + n).classList.add('done'); }
+
+function loading(btnId, on) {
+  const btn = $(btnId);
+  if (on) { btn.disabled = true; btn._t = btn.textContent; btn.innerHTML = '<span class="spinner"></span> 处理中...'; }
+  else { btn.disabled = false; btn.textContent = btn._t || '提交'; }
+}
+
+async function api(method, path, body) {
+  const opts = { method, headers: {} };
+  if (body instanceof FormData) { opts.body = body; }
+  else if (body) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+  const resp = await fetch(API + path, opts);
+  return await resp.json();
+}
+
+function audioPlayer(fid) {
+  return `<audio controls src="${API}/api/v1/files/${fid}"></audio>
+    <div style="margin-top:6px"><span class="file-tag">${fid}</span> <a class="dl-link" href="${API}/api/v1/files/${fid}" download>下载</a></div>`;
+}
+
+function videoPlayer(fid) {
+  return `<video controls src="${API}/api/v1/files/${fid}"></video>
+    <div style="margin-top:6px"><span class="file-tag">${fid}</span> <a class="dl-link" href="${API}/api/v1/files/${fid}" download>下载</a></div>`;
+}
+
+// ── Init: health check + load lists ──
+async function init() {
+  // Health
+  try {
+    const r = await (await fetch(API + '/health')).json();
+    $('statusBadge').textContent = r.status === 'ok' ? '在线' : '异常';
+    $('statusBadge').className = 'badge ' + (r.status === 'ok' ? 'badge-online' : 'badge-offline');
+    $('logDot').className = 'dot ' + (r.status === 'ok' ? 'on' : 'off');
+  } catch { $('statusBadge').textContent = '离线'; $('statusBadge').className = 'badge badge-offline'; $('logDot').className = 'dot off'; }
+  // GPU
+  try {
+    const g = await (await fetch(API + '/health/gpu')).json();
+    if (g.cuda_available && g.devices?.length) {
+      const d = g.devices[0];
+      $('gpuInfo').textContent = 'GPU: ' + d.name + ' (' + d.total_memory_gb + 'GB)';
+    } else { $('gpuInfo').textContent = 'GPU: N/A'; }
+  } catch {}
+  // Load lists
+  refreshSpeakers(); refreshFaces(); refreshTracks();
+}
+init();
+
+async function refreshSpeakers() {
+  try {
+    const r = await api('GET', '/api/v1/voice/speakers');
+    if (r.success && r.data) {
+      $('v-speaker').innerHTML = r.data.map(s => `<option value="${s.name}">${s.name}</option>`).join('');
+    }
+  } catch {}
+}
+
+async function refreshFaces() {
+  try {
+    const r = await api('GET', '/api/v1/digital-human/faces');
+    if (r.success && r.data) {
+      const html = r.data.map(f => { const n = typeof f === 'string' ? f : (f.name || f); return `<option value="${n}">${n}</option>`; }).join('');
+      $('dh-face').innerHTML = html;
+    }
+  } catch {}
+}
+
+async function refreshTracks() {
+  try {
+    const r = await api('GET', '/api/v1/bgm/tracks');
+    if (r.success && r.data) {
+      $('bgm-track').innerHTML = r.data.map(t => `<option value="${t.name}">${t.name}</option>`).join('');
+    }
+  } catch {}
+}
+
+// ── Rewrite mode toggle ──
+document.querySelectorAll('input[name="rewrite-mode"]').forEach(r => {
+  r.addEventListener('change', () => {
+    $('rewrite-instruction-group').style.display = r.value === 'custom' && r.checked ? 'block' : 'none';
+  });
+});
+
+// ── STEP 1: Douyin ──
+async function douyinExtract() {
+  const link = $('dy-link').value.trim();
+  if (!link) { showRes('dy-res', '请输入抖音分享链接', true); return; }
+  loading('btn-dy-extract', true);
+  log('正在提取抖音视频文案...');
+  try {
+    const r = await api('POST', '/api/v1/douyin/transcribe', { share_link: link });
+    if (r.success) {
+      showRes('dy-res', r.data);
+      // Fill script text
+      if (r.data.transcript) {
+        $('script-text').value = r.data.transcript;
+        state.scriptText = r.data.transcript;
+      }
+      // Show video if available
+      if (r.data.files?.length) {
+        const vf = r.data.files.find(f => f.filename?.endsWith('.mp4'));
+        if (vf) $('dy-preview').innerHTML = videoPlayer(vf.file_id);
+      }
+      markDone(1);
+      log('文案提取完成');
+    } else {
+      showRes('dy-res', r.error?.message || '提取失败', true);
+      log('文案提取失败');
+    }
+  } catch (e) { showRes('dy-res', e.message, true); log('请求失败'); }
+  loading('btn-dy-extract', false);
+}
+
+// ── STEP 2: Rewrite ──
+async function rewriteScript() {
+  const mode = document.querySelector('input[name="rewrite-mode"]:checked')?.value;
+  const text = $('script-text').value.trim();
+  if (!text) { showRes('rewrite-res', '请先输入文案内容', true); return; }
+
+  if (mode === 'none') {
+    state.scriptText = text;
+    markDone(2);
+    showRes('rewrite-res', '文案已确认（未改写）');
+    log('文案确认完成');
+    return;
+  }
+
+  loading('btn-rewrite', true);
+  log('正在改写文案...');
+  try {
+    let r;
+    if (mode === 'auto') {
+      r = await api('POST', '/api/v1/rewrite/auto', { text });
+    } else {
+      const instruction = $('rewrite-instruction').value.trim();
+      if (!instruction) { showRes('rewrite-res', '请输入改写指令', true); loading('btn-rewrite', false); return; }
+      r = await api('POST', '/api/v1/rewrite/instruction', { text, instruction });
+    }
+    if (r.success) {
+      const newText = r.data.rewritten_text || '';
+      $('script-text').value = newText;
+      state.scriptText = newText;
+      showRes('rewrite-res', '改写完成');
+      markDone(2);
+      log('文案改写完成');
+    } else {
+      showRes('rewrite-res', r.error?.message || '改写失败', true);
+      log('改写失败');
+    }
+  } catch (e) { showRes('rewrite-res', e.message, true); log('请求失败'); }
+  loading('btn-rewrite', false);
+}
+
+// ── STEP 3: Audio (TTS) ──
+async function generateAudio() {
+  const text = $('script-text').value.trim();
+  if (!text) { showRes('tts-res', '请先在步骤2填写文案', true); return; }
+  const speaker = $('v-speaker').value;
+  const speed = parseFloat($('v-speed').value) || 1.0;
+  const promptFile = $('v-prompt-audio').files[0];
+  const promptText = $('v-prompt-text').value.trim();
+
+  loading('btn-tts', true);
+  log('正在生成音频...');
+  try {
+    let r;
+    if (promptFile && promptText) {
+      // Zero-shot
+      const fd = new FormData();
+      fd.append('text', text);
+      fd.append('prompt_text', promptText);
+      fd.append('speed', speed);
+      fd.append('prompt_wav', promptFile);
+      r = await api('POST', '/api/v1/voice/zero-shot', fd);
+    } else {
+      // Normal TTS
+      if (!speaker) { showRes('tts-res', '请选择音色', true); loading('btn-tts', false); return; }
+      r = await api('POST', '/api/v1/voice/synthesize', { text, speaker, speed });
+    }
+    if (r.success) {
+      state.audioFileId = r.data.file_id;
+      showRes('tts-res', r.data);
+      $('tts-preview').innerHTML = audioPlayer(r.data.file_id);
+      markDone(3);
+      log('音频生成完成: ' + r.data.file_id);
+    } else {
+      showRes('tts-res', r.error?.message || '生成失败', true);
+      log('音频生成失败');
+    }
+  } catch (e) { showRes('tts-res', e.message, true); log('请求失败'); }
+  loading('btn-tts', false);
+}
+
+// ── STEP 4: Video upload ──
+async function onVideoFileSelected(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const area = $('upload-video-area');
+  area.classList.add('has-file');
+  area.querySelector('.text').textContent = '';
+  area.querySelector('.icon').textContent = '';
+  const nameEl = document.createElement('div');
+  nameEl.className = 'filename';
+  nameEl.textContent = file.name;
+  area.querySelector('.text').replaceWith(nameEl);
+
+  // Upload file
+  log('正在上传视频素材...');
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('category', 'upload');
+  try {
+    const r = await api('POST', '/api/v1/files/upload', fd);
+    if (r.success) {
+      state.uploadVideoFileId = r.data.file_id;
+      $('upload-video-info').style.display = 'block';
+      $('upload-video-tag').textContent = 'file_id: ' + r.data.file_id;
+      log('视频素材上传完成: ' + r.data.file_id);
+    } else {
+      log('视频上传失败');
+    }
+  } catch { log('视频上传失败'); }
+}
+
+// ── STEP 4: Generate digital human video ──
+async function generateVideo() {
+  const audioId = $('dh-audio-override').value.trim() || state.audioFileId;
+  if (!audioId) { showRes('dh-res', '请先在步骤3生成音频，或手动填入音频file_id', true); return; }
+
+  const body = {
+    audio_file_id: audioId,
+    batch_size: parseInt($('dh-batch').value) || 4,
+  };
+
+  // Custom uploaded video takes priority
+  if (state.uploadVideoFileId) {
+    body.video_file_id = state.uploadVideoFileId;
+  } else {
+    const face = $('dh-face').value;
+    if (face) body.face = face;
+  }
+
+  loading('btn-dh', true);
+  log('正在生成数字人视频（约30-60秒）...');
+  try {
+    const r = await api('POST', '/api/v1/digital-human/generate', body);
+    if (r.success) {
+      state.videoFileId = r.data.file_id;
+      state.finalVideoFileId = r.data.file_id;
+      showRes('dh-res', r.data);
+      $('dh-preview').innerHTML = videoPlayer(r.data.file_id);
+      markDone(4);
+      log('视频生成完成: ' + r.data.file_id + ' (' + (r.data.elapsed_seconds||'?') + 's)');
+    } else {
+      showRes('dh-res', r.error?.message || '生成失败', true);
+      log('视频生成失败');
+    }
+  } catch (e) { showRes('dh-res', e.message, true); log('请求失败'); }
+  loading('btn-dh', false);
+}
+
+// ── STEP 5: Subtitle ──
+async function generateSubtitle() {
+  const videoId = state.finalVideoFileId || state.videoFileId;
+  if (!videoId) { showRes('sub-res', '请先在步骤4生成视频', true); return; }
+
+  loading('btn-sub', true);
+  log('正在生成字幕...');
+  try {
+    // Generate SRT
+    const r = await api('POST', '/api/v1/subtitle/generate-srt', {
+      audio_file_id: state.audioFileId || videoId,
+      language: 'zh',
+      max_chars: 20,
+    });
+    if (r.success) {
+      state.srtFileId = r.data.file_id;
+      showRes('sub-res', r.data);
+      // Show burn button
+      $('sub-divider').style.display = 'block';
+      $('btn-burn').style.display = 'block';
+      markDone(5);
+      log('字幕生成完成: ' + r.data.entries_count + ' 条');
+    } else {
+      showRes('sub-res', r.error?.message || '生成失败', true);
+      log('字幕生成失败');
+    }
+  } catch (e) { showRes('sub-res', e.message, true); log('请求失败'); }
+  loading('btn-sub', false);
+}
+
+async function burnSubtitle() {
+  const videoId = state.finalVideoFileId || state.videoFileId;
+  if (!videoId || !state.srtFileId) { showRes('burn-res', '缺少视频或字幕文件', true); return; }
+
+  loading('btn-burn', true);
+  log('正在烧录字幕到视频...');
+  try {
+    const r = await api('POST', '/api/v1/subtitle/burn', {
+      video_file_id: videoId,
+      srt_file_id: state.srtFileId,
+      font_name: $('sub-font').value || null,
+      font_size: parseInt($('sub-size').value) || 24,
+      font_color: $('sub-color').value.toUpperCase(),
+      outline_color: $('sub-outline-color').value.toUpperCase(),
+      outline: parseInt($('sub-outline').value) || 2,
+      bottom_margin: parseInt($('sub-margin').value) || 30,
+    });
+    if (r.success) {
+      state.burnedVideoFileId = r.data.file_id;
+      state.finalVideoFileId = r.data.file_id;
+      showRes('burn-res', r.data);
+      $('burn-preview').innerHTML = videoPlayer(r.data.file_id);
+      log('字幕烧录完成: ' + r.data.file_id);
+    } else {
+      showRes('burn-res', r.error?.message || '烧录失败', true);
+      log('字幕烧录失败');
+    }
+  } catch (e) { showRes('burn-res', e.message, true); log('请求失败'); }
+  loading('btn-burn', false);
+}
+
+// ── STEP 6: BGM ──
+async function addBgm() {
+  if ($('bgm-none-check').checked) {
+    showRes('bgm-res', '已跳过背景音乐');
+    markDone(6);
+    log('跳过BGM');
+    return;
+  }
+
+  const videoId = state.finalVideoFileId;
+  if (!videoId) { showRes('bgm-res', '请先完成前面的步骤生成视频', true); return; }
+
+  const body = {
+    video_file_id: videoId,
+    bgm_volume: parseFloat($('bgm-vol').value) || 0.2,
+    original_volume: parseFloat($('bgm-orig').value) || 1.0,
+    loop_bgm: true,
+    fade_out_seconds: parseFloat($('bgm-fade').value) || 2.0,
+  };
+
+  const trackName = $('bgm-track').value;
+  if (trackName && !$('bgm-custom-check').checked) {
+    body.bgm_name = trackName;
+  } else {
+    body.random_choice = true;
+  }
+
+  loading('btn-bgm', true);
+  log('正在混合背景音乐...');
+  try {
+    const r = await api('POST', '/api/v1/bgm/mix', body);
+    if (r.success) {
+      state.finalVideoFileId = r.data.file_id;
+      showRes('bgm-res', r.data);
+      $('bgm-preview').innerHTML = videoPlayer(r.data.file_id);
+      markDone(6);
+      log('BGM 混合完成: ' + r.data.track_name);
+    } else {
+      showRes('bgm-res', r.error?.message || '混合失败', true);
+      log('BGM 混合失败');
+    }
+  } catch (e) { showRes('bgm-res', e.message, true); log('请求失败'); }
+  loading('btn-bgm', false);
+}
+</script>
+</body>
+</html>

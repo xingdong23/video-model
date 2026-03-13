@@ -1,0 +1,4 @@
+faster-whisper>=1.1,<2
+fonttools>=4.54
+moviepy>=1.0,<3
+requests>=2.32
