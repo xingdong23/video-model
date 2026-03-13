@@ -1,24 +1,20 @@
 from __future__ import annotations
 
 import logging
-import sys
-import threading
 from typing import Optional
 
 logger = logging.getLogger("api.dependencies")
 
 
 class EngineManager:
-    """Singleton manager: holds engine instances and per-engine locks."""
+    """Singleton manager: holds engine instances.
+
+    Concurrency is managed by TaskManager queues, not per-engine locks.
+    """
 
     _instance: Optional["EngineManager"] = None
 
     def __init__(self):
-        # Per-engine locks — different modules don't block each other
-        self._voice_lock = threading.Lock()
-        self._digital_human_lock = threading.Lock()
-        self._subtitle_lock = threading.Lock()
-
         self._voice_engine = None
         self._digital_human_engine = None
         self._subtitle_engine = None
@@ -31,7 +27,6 @@ class EngineManager:
     def init_voice(self):
         from .config import get_settings
         settings = get_settings()
-        sys.path.insert(0, str(settings.my_video_root))
         from voice.engine import VoiceEngine
         logger.info("Loading VoiceEngine (model_dir=%s, fp16=%s) ...", settings.voice_model_dir, settings.voice_fp16)
         self._voice_engine = VoiceEngine(model_dir=settings.voice_model_dir, fp16=settings.voice_fp16)
@@ -41,16 +36,11 @@ class EngineManager:
     def voice_engine(self):
         return self._voice_engine
 
-    @property
-    def voice_lock(self) -> threading.Lock:
-        return self._voice_lock
-
     # ── Digital Human ──
 
     def init_digital_human(self):
         from .config import get_settings
         settings = get_settings()
-        sys.path.insert(0, str(settings.my_video_root))
         from digital_human.engine import DigitalHumanEngine
         logger.info("Loading DigitalHumanEngine ...")
         self._digital_human_engine = DigitalHumanEngine(
@@ -64,16 +54,11 @@ class EngineManager:
     def digital_human_engine(self):
         return self._digital_human_engine
 
-    @property
-    def digital_human_lock(self) -> threading.Lock:
-        return self._digital_human_lock
-
     # ── Subtitle ──
 
     def init_subtitle(self):
         from .config import get_settings
         settings = get_settings()
-        sys.path.insert(0, str(settings.my_video_root))
         from subtitle.engine import SubtitleEngine
         logger.info("Loading SubtitleEngine ...")
         self._subtitle_engine = SubtitleEngine(
@@ -88,16 +73,11 @@ class EngineManager:
     def subtitle_engine(self):
         return self._subtitle_engine
 
-    @property
-    def subtitle_lock(self) -> threading.Lock:
-        return self._subtitle_lock
-
-    # ── BGM (thread-safe, no lock) ──
+    # ── BGM ──
 
     def init_bgm(self):
         from .config import get_settings
         settings = get_settings()
-        sys.path.insert(0, str(settings.my_video_root))
         from bgm.engine import BgmEngine
         logger.info("Loading BgmEngine ...")
         self._bgm_engine = BgmEngine(
@@ -110,12 +90,11 @@ class EngineManager:
     def bgm_engine(self):
         return self._bgm_engine
 
-    # ── Rewrite (stateless, no lock) ──
+    # ── Rewrite ──
 
     def init_rewrite(self):
         from .config import get_settings
         settings = get_settings()
-        sys.path.insert(0, str(settings.my_video_root))
         from rewrite.engine import RewriteEngine
         logger.info("Loading RewriteEngine ...")
         self._rewrite_engine = RewriteEngine(
@@ -136,7 +115,6 @@ class EngineManager:
         if self._workflow_engine is None:
             from .config import get_settings
             settings = get_settings()
-            sys.path.insert(0, str(settings.my_video_root))
             from workflow.engine import WorkflowEngine
             self._workflow_engine = WorkflowEngine(
                 voice_model_dir=settings.voice_model_dir,

@@ -108,6 +108,12 @@ class WorkflowEngine:
     def run(
         self,
         *,
+        audio_config=None,
+        digital_human_config=None,
+        subtitle_config=None,
+        subtitle_style_config=None,
+        bgm_config=None,
+        # Legacy kwargs for CLI / direct usage
         audio: Optional[str] = None,
         text: Optional[str] = None,
         speaker: Optional[str] = None,
@@ -157,14 +163,115 @@ class WorkflowEngine:
         beautify_teeth: bool = False,
         runtime: Optional[str] = None,
     ) -> WorkflowResult:
-        final_output = self._resolve_final_output(output=output, with_subtitles=with_subtitles)
+        # Resolve config objects vs legacy kwargs.
+        # Explicit kwargs (audio, video, prompt_audio) take precedence — the API router
+        # resolves file_id -> path and passes it as the explicit kwarg.
+        if audio_config is not None:
+            _audio = audio or getattr(audio_config, "file_id", None)
+            _text = text or getattr(audio_config, "text", None)
+            _speaker = speaker or getattr(audio_config, "speaker", None)
+            _prompt_text = prompt_text or getattr(audio_config, "prompt_text", None)
+            _prompt_audio = prompt_audio or getattr(audio_config, "prompt_audio_file_id", None)
+            _speed = getattr(audio_config, "speed", 1.0)
+        else:
+            _audio, _text, _speaker = audio, text, speaker
+            _prompt_text, _prompt_audio, _speed = prompt_text, prompt_audio, speed
+
+        if digital_human_config is not None:
+            dc = digital_human_config
+            _face = face or dc.face
+            _video = video or dc.video_file_id
+            _batch_size = dc.batch_size
+            _sync_offset = dc.sync_offset
+            _scale_h = dc.scale_h
+            _scale_w = dc.scale_w
+            _compress_inference = dc.compress_inference
+            _beautify_teeth = dc.beautify_teeth
+            _runtime = dc.runtime
+        else:
+            _face, _video = face, video
+            _batch_size, _sync_offset = batch_size, sync_offset
+            _scale_h, _scale_w = scale_h, scale_w
+            _compress_inference, _beautify_teeth = compress_inference, beautify_teeth
+            _runtime = runtime
+
+        _with_subtitles = subtitle_config is not None if audio_config is not None else with_subtitles
+        if subtitle_config is not None:
+            sc = subtitle_config
+            _subtitle_correct = sc.correct
+            _subtitle_language = sc.language
+            _subtitle_max_chars = sc.max_chars
+            _subtitle_beam_size = sc.beam_size
+            _subtitle_best_of = sc.best_of
+            _subtitle_vad_filter = sc.vad_filter
+            _subtitle_vad_min_silence_ms = sc.vad_min_silence_ms
+            _subtitle_speech_pad_ms = sc.speech_pad_ms
+            _subtitle_api_key = sc.api_key
+            _subtitle_api_base = sc.api_base
+            _subtitle_llm_model = sc.llm_model
+            _subtitle_request_timeout = sc.request_timeout
+        else:
+            _subtitle_correct = subtitle_correct
+            _subtitle_language = subtitle_language
+            _subtitle_max_chars = subtitle_max_chars
+            _subtitle_beam_size = subtitle_beam_size
+            _subtitle_best_of = subtitle_best_of
+            _subtitle_vad_filter = subtitle_vad_filter
+            _subtitle_vad_min_silence_ms = subtitle_vad_min_silence_ms
+            _subtitle_speech_pad_ms = subtitle_speech_pad_ms
+            _subtitle_api_key = subtitle_api_key
+            _subtitle_api_base = subtitle_api_base
+            _subtitle_llm_model = subtitle_llm_model
+            _subtitle_request_timeout = subtitle_request_timeout
+
+        if subtitle_style_config is not None:
+            ss = subtitle_style_config
+            _subtitle_font_path = ss.font_path
+            _subtitle_font_name = ss.font_name
+            _subtitle_font_index = ss.font_index
+            _subtitle_font_size = ss.font_size
+            _subtitle_font_color = ss.font_color
+            _subtitle_outline_color = ss.outline_color
+            _subtitle_outline = ss.outline
+            _subtitle_wrap_style = ss.wrap_style
+            _subtitle_bottom_margin = ss.bottom_margin
+        else:
+            _subtitle_font_path = subtitle_font_path
+            _subtitle_font_name = subtitle_font_name
+            _subtitle_font_index = subtitle_font_index
+            _subtitle_font_size = subtitle_font_size
+            _subtitle_font_color = subtitle_font_color
+            _subtitle_outline_color = subtitle_outline_color
+            _subtitle_outline = subtitle_outline
+            _subtitle_wrap_style = subtitle_wrap_style
+            _subtitle_bottom_margin = subtitle_bottom_margin
+
+        if bgm_config is not None:
+            bc = bgm_config
+            _bgm_path = bc.path
+            _bgm_name = bc.name
+            _bgm_random = bc.random
+            _bgm_volume = bc.volume
+            _bgm_original_volume = bc.original_volume
+            _bgm_fade_out = bc.fade_out
+            _bgm_loop = bc.loop
+        else:
+            _bgm_path = bgm_path
+            _bgm_name = bgm_name
+            _bgm_random = bgm_random
+            _bgm_volume = bgm_volume
+            _bgm_original_volume = bgm_original_volume
+            _bgm_fade_out = bgm_fade_out
+            _bgm_loop = bgm_loop
+
+        final_output = self._resolve_final_output(output=output, with_subtitles=_with_subtitles)
         audio_path, audio_generated = self._resolve_audio(
-            audio=audio,
-            text=text,
-            speaker=speaker,
-            prompt_text=prompt_text,
-            prompt_audio=prompt_audio,
-            speed=speed,
+            audio=_audio,
+            text=_text,
+            speaker=_speaker,
+            prompt_text=_prompt_text,
+            prompt_audio=_prompt_audio,
+            speed=_speed,
             audio_output=audio_output,
             output_hint=final_output,
         )
@@ -172,33 +279,33 @@ class WorkflowEngine:
         raw_video_path = self._resolve_raw_video_output(
             final_output=final_output,
             raw_video_output=raw_video_output,
-            with_subtitles=with_subtitles,
+            with_subtitles=_with_subtitles,
         )
         video_result = self.digital_human_engine.generate(
             audio=audio_path,
-            face=face,
-            video=video,
+            face=_face,
+            video=_video,
             output_path=raw_video_path,
-            batch_size=batch_size,
-            sync_offset=sync_offset,
-            scale_h=scale_h,
-            scale_w=scale_w,
-            compress_inference=compress_inference,
-            beautify_teeth=beautify_teeth,
-            runtime=runtime or self._runtime,
+            batch_size=_batch_size,
+            sync_offset=_sync_offset,
+            scale_h=_scale_h,
+            scale_w=_scale_w,
+            compress_inference=_compress_inference,
+            beautify_teeth=_beautify_teeth,
+            runtime=_runtime or self._runtime,
         )
 
-        if not with_subtitles:
+        if not _with_subtitles:
             bgm_result = self._maybe_apply_bgm(
                 current_video_path=video_result.output_path,
                 final_output=final_output,
-                bgm_path=bgm_path,
-                bgm_name=bgm_name,
-                bgm_random=bgm_random,
-                bgm_volume=bgm_volume,
-                bgm_original_volume=bgm_original_volume,
-                bgm_fade_out=bgm_fade_out,
-                bgm_loop=bgm_loop,
+                bgm_path=_bgm_path,
+                bgm_name=_bgm_name,
+                bgm_random=_bgm_random,
+                bgm_volume=_bgm_volume,
+                bgm_original_volume=_bgm_original_volume,
+                bgm_fade_out=_bgm_fade_out,
+                bgm_loop=_bgm_loop,
             )
             return WorkflowResult(
                 audio_path=audio_path,
@@ -222,43 +329,43 @@ class WorkflowEngine:
         subtitle_result = self.subtitle_engine.generate_srt(
             input_path=str(audio_path),
             output_path=str(subtitle_path),
-            language=subtitle_language,
-            max_chars=subtitle_max_chars,
-            beam_size=subtitle_beam_size,
-            best_of=subtitle_best_of,
-            vad_filter=subtitle_vad_filter,
-            vad_min_silence_ms=subtitle_vad_min_silence_ms,
-            speech_pad_ms=subtitle_speech_pad_ms,
-            apply_correction=subtitle_correct,
-            correction_api_key=subtitle_api_key,
-            correction_api_base=subtitle_api_base,
-            correction_model_name=subtitle_llm_model,
-            correction_timeout=subtitle_request_timeout,
+            language=_subtitle_language,
+            max_chars=_subtitle_max_chars,
+            beam_size=_subtitle_beam_size,
+            best_of=_subtitle_best_of,
+            vad_filter=_subtitle_vad_filter,
+            vad_min_silence_ms=_subtitle_vad_min_silence_ms,
+            speech_pad_ms=_subtitle_speech_pad_ms,
+            apply_correction=_subtitle_correct,
+            correction_api_key=_subtitle_api_key,
+            correction_api_base=_subtitle_api_base,
+            correction_model_name=_subtitle_llm_model,
+            correction_timeout=_subtitle_request_timeout,
         )
         burn_result = self.subtitle_engine.burn_subtitles(
             video_path=str(video_result.output_path),
             subtitle_path=str(subtitle_result.srt_path),
             output_path=str(final_output),
-            font_path=subtitle_font_path,
-            font_name=subtitle_font_name,
-            font_index=subtitle_font_index,
-            font_size=subtitle_font_size,
-            font_color=subtitle_font_color,
-            outline_color=subtitle_outline_color,
-            outline=subtitle_outline,
-            wrap_style=subtitle_wrap_style,
-            bottom_margin=subtitle_bottom_margin,
+            font_path=_subtitle_font_path,
+            font_name=_subtitle_font_name,
+            font_index=_subtitle_font_index,
+            font_size=_subtitle_font_size,
+            font_color=_subtitle_font_color,
+            outline_color=_subtitle_outline_color,
+            outline=_subtitle_outline,
+            wrap_style=_subtitle_wrap_style,
+            bottom_margin=_subtitle_bottom_margin,
         )
         bgm_result = self._maybe_apply_bgm(
             current_video_path=burn_result.output_path,
             final_output=final_output,
-            bgm_path=bgm_path,
-            bgm_name=bgm_name,
-            bgm_random=bgm_random,
-            bgm_volume=bgm_volume,
-            bgm_original_volume=bgm_original_volume,
-            bgm_fade_out=bgm_fade_out,
-            bgm_loop=bgm_loop,
+            bgm_path=_bgm_path,
+            bgm_name=_bgm_name,
+            bgm_random=_bgm_random,
+            bgm_volume=_bgm_volume,
+            bgm_original_volume=_bgm_original_volume,
+            bgm_fade_out=_bgm_fade_out,
+            bgm_loop=_bgm_loop,
         )
         return WorkflowResult(
             audio_path=audio_path,

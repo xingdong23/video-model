@@ -338,6 +338,7 @@ class LstmSync:
         scale_w: float = 1.0,
         compress_inference_check_box: bool = False,
         ffmpeg_bin: str = "ffmpeg",
+        progress_callback=None,
     ):
         self.human_path = Path(human_path).expanduser().resolve()
         self.hubert_path = Path(hubert_path).expanduser().resolve()
@@ -354,6 +355,7 @@ class LstmSync:
         self.model_dtype = np.float16 if runtime.resolved == "cuda" else np.float32
         self.device = runtime.torch_device
         self.ffmpeg_bin = ffmpeg_bin
+        self._progress_callback = progress_callback
 
         repair_npy_path = self.checkpoints_dir / "repair.npy"
         auxiliary_path = self.checkpoints_dir / "auxiliary"
@@ -371,6 +373,10 @@ class LstmSync:
             mask_image=mask_image,
             dtype=torch.float32,
         )
+
+    def _report(self, step: str, progress: int, message: str) -> None:
+        if self._progress_callback:
+            self._progress_callback(step, progress, message)
 
     def _face_detect(self, images: list[np.ndarray]):
         faces = []
@@ -444,6 +450,7 @@ class LstmSync:
         if compress_inference_check_box is not None:
             self.compress_inference_check_box = compress_inference_check_box
 
+        self._report("preprocessing", 5, "视频预处理中...")
         source_video_path = Path(video_path).expanduser().resolve()
         fps25_path = Path(video_fps25_path).expanduser().resolve()
         temp_video_path = Path(f"{video_temp_path}.mp4").expanduser().resolve()
@@ -515,6 +522,7 @@ class LstmSync:
             ]
         )
 
+        self._report("audio_features", 20, "提取音频特征...")
         feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(str(self.hubert_path))
         hubert_model = HubertModel.from_pretrained(str(self.hubert_path)).to(self.device).eval()
         if self.runtime.resolved == "cuda":
@@ -545,17 +553,21 @@ class LstmSync:
             rep_chunks.append(reps[0, :, start_idx : start_idx + rep_step_size])
             index += 1
 
+        self._report("face_detection", 35, "人脸检测...")
         frame_height, frame_width = full_frames[0].shape[:-1]
+        total_batches = int(np.ceil(float(len(full_frames)) / self.wav2lip_batch_size))
         writer = cv2.VideoWriter(str(temp_video_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (frame_width, frame_height))
 
         try:
             for batch_index, (img_batch, mel_batch, frames, coords, affines) in enumerate(
                 tqdm(
                     self._datagen(full_frames, rep_chunks),
-                    total=int(np.ceil(float(len(full_frames)) / self.wav2lip_batch_size)),
+                    total=total_batches,
                     desc="Generating video",
                 )
             ):
+                pct = 40 + int(50 * batch_index / max(total_batches, 1))
+                self._report("inference", pct, f"推理中 {batch_index * self.wav2lip_batch_size}/{len(rep_chunks)}")
                 mel_batch = np.transpose(mel_batch, (0, 2, 1))
                 generated_frames = []
                 for frame_index in range(mel_batch.shape[0]):
@@ -596,6 +608,7 @@ class LstmSync:
         finally:
             writer.release()
 
+        self._report("compositing", 92, "合成视频...")
         try:
             if not self._try_nvenc_final_merge(temp_video_path, temp_audio_path, final_video_path):
                 run_command(
@@ -631,6 +644,7 @@ class LstmSync:
             if self.runtime.resolved == "cuda":
                 torch.cuda.empty_cache()
 
+        self._report("completed", 100, "完成")
         return final_video_path
 
     def _try_nvenc_fps_normalize(self, source_path: Path, dest_path: Path) -> bool:

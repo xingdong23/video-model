@@ -104,6 +104,7 @@ class DigitalHumanEngine:
         compress_inference: bool = False,
         beautify_teeth: bool = False,
         runtime: str | None = None,
+        progress_callback=None,
     ) -> GenerationResult:
         audio_path = Path(audio).expanduser().resolve()
         if not audio_path.exists():
@@ -142,6 +143,7 @@ class DigitalHumanEngine:
             compress_inference_check_box=compress_inference,
             ffmpeg_bin=self.ffmpeg_bin,
             runtime=runtime_selection,
+            progress_callback=progress_callback,
         )
         try:
             result = lstm_sync.run(

@@ -3,13 +3,14 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, File, Form, UploadFile
+from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
 from ..dependencies import get_engine_manager
 from ..errors import APIError, ErrorCode, success_response
 from ..schemas import SpeakerItem, VoiceSynthesizeRequest
 from ..storage import get_storage
+from ..task_manager import Task, get_task_manager, _make_progress_callback
 
 router = APIRouter()
 
@@ -24,29 +25,42 @@ async def list_speakers():
     return success_response(items)
 
 
-@router.post("/synthesize")
-async def synthesize(req: VoiceSynthesizeRequest):
+def _execute_synthesize(task: Task, params: dict) -> dict:
+    em = get_engine_manager()
+    storage = get_storage()
+
+    cb = _make_progress_callback(task)
+    cb("synthesizing", 10, "语音合成中...")
+
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+        tmp_path = tmp.name
+    em.voice_engine.synthesize_to_file(
+        text=params["text"], speaker=params["speaker"], output_path=tmp_path, speed=params["speed"]
+    )
+
+    cb("saving", 90, "保存文件...")
+    file_id = storage.save(tmp_path, "voice", f"{params['speaker']}.wav")
+    Path(tmp_path).unlink(missing_ok=True)
+    return {
+        "file_id": file_id,
+        "download_url": storage.get_url(file_id),
+    }
+
+
+@router.post("/synthesize", status_code=202)
+async def synthesize(req: VoiceSynthesizeRequest, request: Request):
     em = get_engine_manager()
     if em.voice_engine is None:
         raise APIError(ErrorCode.ENGINE_ERROR, "VoiceEngine not loaded", 503)
 
-    with em.voice_lock:
-        try:
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-                tmp_path = tmp.name
-            em.voice_engine.synthesize_to_file(
-                text=req.text, speaker=req.speaker, output_path=tmp_path, speed=req.speed
-            )
-        except Exception as e:
-            raise APIError(ErrorCode.ENGINE_ERROR, str(e))
-
-    storage = get_storage()
-    file_id = storage.save(tmp_path, "voice", f"{req.speaker}.wav")
-    Path(tmp_path).unlink(missing_ok=True)
-    return success_response({
-        "file_id": file_id,
-        "download_url": storage.get_url(file_id),
-    })
+    task_id = get_task_manager().submit(
+        task_type="voice/synthesize",
+        params={"text": req.text, "speaker": req.speaker, "speed": req.speed},
+        executor_fn=_execute_synthesize,
+        request_id=request.headers.get("X-Request-ID"),
+        gpu=True,
+    )
+    return success_response({"task_id": task_id})
 
 
 @router.post("/synthesize/stream")
@@ -55,24 +69,51 @@ async def synthesize_stream(req: VoiceSynthesizeRequest):
     if em.voice_engine is None:
         raise APIError(ErrorCode.ENGINE_ERROR, "VoiceEngine not loaded", 503)
 
-    with em.voice_lock:
-        try:
-            wav_bytes = em.voice_engine.synthesize_to_wav_bytes(
-                text=req.text, speaker=req.speaker, speed=req.speed
-            )
-        except Exception as e:
-            raise APIError(ErrorCode.ENGINE_ERROR, str(e))
+    try:
+        wav_bytes = em.voice_engine.synthesize_to_wav_bytes(
+            text=req.text, speaker=req.speaker, speed=req.speed
+        )
+    except Exception as e:
+        raise APIError(ErrorCode.ENGINE_ERROR, str(e))
 
     import io
     return StreamingResponse(io.BytesIO(wav_bytes), media_type="audio/wav")
 
 
-@router.post("/zero-shot")
+def _execute_zero_shot(task: Task, params: dict) -> dict:
+    em = get_engine_manager()
+    storage = get_storage()
+
+    cb = _make_progress_callback(task)
+    cb("synthesizing", 10, "零样本语音合成中...")
+
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as out_tmp:
+        out_path = out_tmp.name
+    em.voice_engine.synthesize_zero_shot_to_file(
+        text=params["text"],
+        prompt_text=params["prompt_text"],
+        prompt_audio_path=params["prompt_path"],
+        output_path=out_path,
+        speed=params["speed"],
+    )
+
+    cb("saving", 90, "保存文件...")
+    Path(params["prompt_path"]).unlink(missing_ok=True)
+    file_id = storage.save(out_path, "voice", "zero_shot.wav")
+    Path(out_path).unlink(missing_ok=True)
+    return {
+        "file_id": file_id,
+        "download_url": storage.get_url(file_id),
+    }
+
+
+@router.post("/zero-shot", status_code=202)
 async def zero_shot(
     text: str = Form(...),
     prompt_text: str = Form(...),
     speed: float = Form(1.0),
     prompt_wav: UploadFile = File(...),
+    request: Request = None,
 ):
     em = get_engine_manager()
     if em.voice_engine is None:
@@ -83,30 +124,19 @@ async def zero_shot(
         tmp.write(await prompt_wav.read())
         prompt_path = tmp.name
 
-    try:
-        with em.voice_lock:
-            try:
-                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as out_tmp:
-                    out_path = out_tmp.name
-                em.voice_engine.synthesize_zero_shot_to_file(
-                    text=text,
-                    prompt_text=prompt_text,
-                    prompt_audio_path=prompt_path,
-                    output_path=out_path,
-                    speed=speed,
-                )
-            except Exception as e:
-                raise APIError(ErrorCode.ENGINE_ERROR, str(e))
-    finally:
-        Path(prompt_path).unlink(missing_ok=True)
-
-    storage = get_storage()
-    file_id = storage.save(out_path, "voice", "zero_shot.wav")
-    Path(out_path).unlink(missing_ok=True)
-    return success_response({
-        "file_id": file_id,
-        "download_url": storage.get_url(file_id),
-    })
+    task_id = get_task_manager().submit(
+        task_type="voice/zero-shot",
+        params={
+            "text": text,
+            "prompt_text": prompt_text,
+            "prompt_path": prompt_path,
+            "speed": speed,
+        },
+        executor_fn=_execute_zero_shot,
+        request_id=request.headers.get("X-Request-ID") if request else None,
+        gpu=True,
+    )
+    return success_response({"task_id": task_id})
 
 
 @router.post("/voices/export")
@@ -125,15 +155,14 @@ async def export_voice(
         prompt_path = tmp.name
 
     try:
-        with em.voice_lock:
-            try:
-                saved = em.voice_engine.export_custom_voice(
-                    voice_name=voice_name,
-                    prompt_text=prompt_text,
-                    prompt_audio_path=prompt_path,
-                )
-            except Exception as e:
-                raise APIError(ErrorCode.ENGINE_ERROR, str(e))
+        try:
+            saved = em.voice_engine.export_custom_voice(
+                voice_name=voice_name,
+                prompt_text=prompt_text,
+                prompt_audio_path=prompt_path,
+            )
+        except Exception as e:
+            raise APIError(ErrorCode.ENGINE_ERROR, str(e))
     finally:
         Path(prompt_path).unlink(missing_ok=True)
 

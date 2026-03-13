@@ -143,19 +143,19 @@ class DouyinDownloadRequest(BaseModel):
     share_link: str
 
 
-# ── Workflow ──
+# ── Workflow (grouped config) ──
 
 
-class WorkflowRunRequest(BaseModel):
-    # Audio source — provide either audio_file_id or text+speaker
-    audio_file_id: Optional[str] = None
+class AudioSourceConfig(BaseModel):
+    file_id: Optional[str] = None
     text: Optional[str] = None
     speaker: Optional[str] = None
     prompt_text: Optional[str] = None
     prompt_audio_file_id: Optional[str] = None
     speed: float = 1.0
 
-    # Digital human
+
+class DigitalHumanConfig(BaseModel):
     face: Optional[str] = None
     video_file_id: Optional[str] = None
     batch_size: int = 4
@@ -166,38 +166,50 @@ class WorkflowRunRequest(BaseModel):
     beautify_teeth: bool = False
     runtime: Optional[str] = None
 
-    # Subtitle
-    with_subtitles: bool = False
-    subtitle_correct: bool = False
-    subtitle_language: Optional[str] = "zh"
-    subtitle_max_chars: int = 20
-    subtitle_beam_size: int = 10
-    subtitle_best_of: int = 5
-    subtitle_vad_filter: bool = True
-    subtitle_vad_min_silence_ms: int = 1000
-    subtitle_speech_pad_ms: int = 300
-    subtitle_api_key: Optional[str] = None
-    subtitle_api_base: Optional[str] = None
-    subtitle_llm_model: Optional[str] = None
-    subtitle_request_timeout: Optional[int] = None
-    subtitle_font_path: Optional[str] = None
-    subtitle_font_name: Optional[str] = None
-    subtitle_font_index: int = 0
-    subtitle_font_size: int = 24
-    subtitle_font_color: str = "#FFFFFF"
-    subtitle_outline_color: str = "#000000"
-    subtitle_outline: int = 1
-    subtitle_wrap_style: int = 2
-    subtitle_bottom_margin: int = 30
 
-    # BGM
-    bgm_path: Optional[str] = None
-    bgm_name: Optional[str] = None
-    bgm_random: bool = False
-    bgm_volume: float = 0.35
-    bgm_original_volume: float = 1.0
-    bgm_fade_out: float = 0.0
-    bgm_loop: bool = True
+class SubtitleGenerateConfig(BaseModel):
+    language: str = "zh"
+    max_chars: int = 20
+    beam_size: int = 10
+    best_of: int = 5
+    vad_filter: bool = True
+    vad_min_silence_ms: int = 1000
+    speech_pad_ms: int = 300
+    correct: bool = False
+    api_key: Optional[str] = None
+    api_base: Optional[str] = None
+    llm_model: Optional[str] = None
+    request_timeout: Optional[int] = None
+
+
+class SubtitleStyleConfig(BaseModel):
+    font_path: Optional[str] = None
+    font_name: Optional[str] = None
+    font_index: int = 0
+    font_size: int = 24
+    font_color: str = "#FFFFFF"
+    outline_color: str = "#000000"
+    outline: int = 1
+    wrap_style: int = 2
+    bottom_margin: int = 30
+
+
+class BgmConfig(BaseModel):
+    path: Optional[str] = None
+    name: Optional[str] = None
+    random: bool = False
+    volume: float = 0.35
+    original_volume: float = 1.0
+    fade_out: float = 0.0
+    loop: bool = True
+
+
+class WorkflowRunRequest(BaseModel):
+    audio: AudioSourceConfig
+    digital_human: DigitalHumanConfig = Field(default_factory=DigitalHumanConfig)
+    subtitle: Optional[SubtitleGenerateConfig] = None
+    subtitle_style: Optional[SubtitleStyleConfig] = None
+    bgm: Optional[BgmConfig] = None
 
 
 # ── File info ──

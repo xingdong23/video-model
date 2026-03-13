@@ -69,7 +69,11 @@ class LocalStorage(StorageBackend):
         category_dir.mkdir(parents=True, exist_ok=True)
 
         dest = category_dir / stored_name
-        shutil.copy2(str(source), str(dest))
+        try:
+            shutil.move(str(source), str(dest))
+        except (OSError, shutil.Error):
+            # Cross-device move falls back to copy
+            shutil.copy2(str(source), str(dest))
 
         manifest = {
             "file_id": file_id,

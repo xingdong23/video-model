@@ -4,6 +4,8 @@ import logging
 import sys
 import threading
 import time
+import uuid
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,12 +34,59 @@ def _start_cleanup_timer(interval_seconds: int, ttl_seconds: int):
     return t
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    settings = get_settings()
+
+    # ── sys.path setup (once) ──
+    root = str(settings.my_video_root)
+    if root not in sys.path:
+        sys.path.insert(0, root)
+
+    # ── Pre-load engines ──
+    from .dependencies import get_engine_manager
+    em = get_engine_manager()
+
+    logger.info("Pre-loading engines ...")
+    for init_fn, name in [
+        (em.init_voice, "VoiceEngine"),
+        (em.init_digital_human, "DigitalHumanEngine"),
+        (em.init_subtitle, "SubtitleEngine"),
+        (em.init_bgm, "BgmEngine"),
+        (em.init_rewrite, "RewriteEngine"),
+    ]:
+        try:
+            init_fn()
+        except Exception:
+            logger.warning("Failed to pre-load %s", name, exc_info=True)
+    logger.info("Engine pre-loading complete")
+
+    # ── Start TaskManager workers ──
+    from .task_manager import get_task_manager
+    get_task_manager().start()
+
+    # ── Start storage cleanup job ──
+    _start_cleanup_timer(
+        interval_seconds=3600,
+        ttl_seconds=settings.file_ttl_seconds,
+    )
+    logger.info("Storage cleanup job started (TTL=%ds)", settings.file_ttl_seconds)
+
+    yield
+
+    # ── Shutdown ──
+    logger.info("Shutting down")
+    from .task_manager import get_task_manager
+    get_task_manager().shutdown()
+
+
 def create_app():
     settings = get_settings()
 
     app = FastAPI(
         title="my-video API",
         version="1.0.0",
+        lifespan=lifespan,
     )
 
     # ── Auth middleware ──
@@ -45,10 +94,8 @@ def create_app():
     if api_key:
         @app.middleware("http")
         async def auth_middleware(request: Request, call_next):
-            # Health endpoints are public
             if request.url.path in ("/health", "/health/gpu", "/docs", "/openapi.json", "/redoc", "/") or request.url.path.startswith("/static"):
                 return await call_next(request)
-            # Check API key
             provided = request.headers.get("X-API-Key") or request.query_params.get("api_key")
             if provided != api_key:
                 return error_response(ErrorCode.AUTH_ERROR, "Invalid or missing API key", 401)
@@ -65,63 +112,22 @@ def create_app():
         allow_headers=["*"],
     )
 
-    # ── Request logging middleware ──
+    # ── Request-ID + logging middleware ──
     @app.middleware("http")
-    async def log_requests(request: Request, call_next):
+    async def request_id_middleware(request: Request, call_next):
+        request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:16]
+        request.state.request_id = request_id
         start = time.time()
         response = await call_next(request)
         elapsed = time.time() - start
+        response.headers["X-Request-ID"] = request_id
         if elapsed > 1.0:
-            logger.info("%s %s -> %d (%.1fs)", request.method, request.url.path, response.status_code, elapsed)
+            logger.info("[%s] %s %s -> %d (%.1fs)", request_id, request.method, request.url.path, response.status_code, elapsed)
         return response
 
     # ── Error handlers ──
     app.add_exception_handler(APIError, api_error_handler)
     app.add_exception_handler(Exception, generic_error_handler)
-
-    # ── Startup ──
-    @app.on_event("startup")
-    async def startup():
-        root = str(settings.my_video_root)
-        if root not in sys.path:
-            sys.path.insert(0, root)
-
-        from .dependencies import get_engine_manager
-        em = get_engine_manager()
-
-        logger.info("Pre-loading engines ...")
-        try:
-            em.init_voice()
-        except Exception:
-            logger.warning("Failed to pre-load VoiceEngine", exc_info=True)
-        try:
-            em.init_digital_human()
-        except Exception:
-            logger.warning("Failed to pre-load DigitalHumanEngine", exc_info=True)
-        try:
-            em.init_subtitle()
-        except Exception:
-            logger.warning("Failed to pre-load SubtitleEngine", exc_info=True)
-        try:
-            em.init_bgm()
-        except Exception:
-            logger.warning("Failed to pre-load BgmEngine", exc_info=True)
-        try:
-            em.init_rewrite()
-        except Exception:
-            logger.warning("Failed to pre-load RewriteEngine", exc_info=True)
-        logger.info("Engine pre-loading complete")
-
-        # Start storage cleanup job
-        _start_cleanup_timer(
-            interval_seconds=3600,  # every hour
-            ttl_seconds=settings.file_ttl_seconds,
-        )
-        logger.info("Storage cleanup job started (TTL=%ds)", settings.file_ttl_seconds)
-
-    @app.on_event("shutdown")
-    async def shutdown():
-        logger.info("Shutting down")
 
     # ── Health ──
     @app.get("/health")
@@ -147,7 +153,7 @@ def create_app():
         return info
 
     # ── Routers ──
-    from .routers import voice, digital_human, subtitle, bgm, rewrite, douyin, workflow, files
+    from .routers import voice, digital_human, subtitle, bgm, rewrite, douyin, workflow, files, tasks
     app.include_router(voice.router, prefix="/api/v1/voice", tags=["voice"])
     app.include_router(digital_human.router, prefix="/api/v1/digital-human", tags=["digital-human"])
     app.include_router(subtitle.router, prefix="/api/v1/subtitle", tags=["subtitle"])
@@ -156,6 +162,7 @@ def create_app():
     app.include_router(douyin.router, prefix="/api/v1/douyin", tags=["douyin"])
     app.include_router(workflow.router, prefix="/api/v1/workflow", tags=["workflow"])
     app.include_router(files.router, prefix="/api/v1/files", tags=["files"])
+    app.include_router(tasks.router, prefix="/api/v1/tasks", tags=["tasks"])
 
     # ── Static frontend ──
     from pathlib import Path

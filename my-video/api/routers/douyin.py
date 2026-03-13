@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-import contextlib
 import logging
 import sys
 import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from ..config import get_settings
 from ..dependencies import get_engine_manager
 from ..errors import APIError, ErrorCode, success_response
 from ..schemas import DouyinDownloadRequest, DouyinTranscribeRequest
 from ..storage import get_storage
+from ..task_manager import Task, get_task_manager, _make_progress_callback
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -50,41 +50,34 @@ def _transcribe_with_subtitle_engine(video_path: Path) -> str:
     return "\n\n".join(lines).strip()
 
 
-@router.post("/transcribe")
-async def transcribe(req: DouyinTranscribeRequest):
+def _execute_transcribe(task: Task, params: dict) -> dict:
     dt = _get_douyin_module()
-    try:
-        share_link = dt.extract_douyin_share_link(req.share_link)
-    except Exception as e:
-        raise APIError(ErrorCode.VALIDATION_ERROR, f"Invalid share link: {e}", 400)
+
+    cb = _make_progress_callback(task)
+    cb("downloading", 10, "下载抖音视频中...")
 
     with tempfile.TemporaryDirectory() as tmpdir:
+        session = dt._create_session()
         try:
-            # Download video first
-            session = dt._create_session()
-            try:
-                modal_id, page_url = dt.resolve_douyin_page_url(share_link, session=session)
-                play_url, title = dt.resolve_play_url(page_url, session=session)
-                video_path = dt.download_video(
-                    play_url, f"{title}_{modal_id}", download_dir=tmpdir, session=session,
-                )
-            finally:
-                session.close()
+            modal_id, page_url = dt.resolve_douyin_page_url(params["share_link"], session=session)
+            play_url, title = dt.resolve_play_url(page_url, session=session)
+            video_path = dt.download_video(
+                play_url, f"{title}_{modal_id}", download_dir=tmpdir, session=session,
+            )
+        finally:
+            session.close()
 
-            # Try using the shared subtitle engine's whisper model
-            em = get_engine_manager()
-            if em.subtitle_engine is not None:
-                transcript = _transcribe_with_subtitle_engine(video_path)
-            else:
-                transcript = dt.transcribe_video(video_path, save_text_file=True)
+        cb("transcribing", 40, "语音识别中...")
+        em = get_engine_manager()
+        if em.subtitle_engine is not None:
+            transcript = _transcribe_with_subtitle_engine(video_path)
+        else:
+            transcript = dt.transcribe_video(video_path, save_text_file=True)
 
-            if not transcript:
-                raise RuntimeError("语音识别完成，但未提取到有效文本")
-        except APIError:
-            raise
-        except Exception as e:
-            raise APIError(ErrorCode.ENGINE_ERROR, str(e))
+        if not transcript:
+            raise RuntimeError("语音识别完成，但未提取到有效文本")
 
+        cb("saving", 80, "保存文件...")
         storage = get_storage()
         saved = []
         for p in Path(tmpdir).iterdir():
@@ -96,36 +89,67 @@ async def transcribe(req: DouyinTranscribeRequest):
                     "download_url": storage.get_url(file_id),
                 })
 
-    return success_response({"transcript": transcript, "files": saved})
+    return {"transcript": transcript, "files": saved}
 
 
-@router.post("/download")
-async def download(req: DouyinDownloadRequest):
+@router.post("/transcribe", status_code=202)
+async def transcribe(req: DouyinTranscribeRequest, request: Request):
     dt = _get_douyin_module()
     try:
         share_link = dt.extract_douyin_share_link(req.share_link)
     except Exception as e:
         raise APIError(ErrorCode.VALIDATION_ERROR, f"Invalid share link: {e}", 400)
 
+    task_id = get_task_manager().submit(
+        task_type="douyin/transcribe",
+        params={"share_link": share_link},
+        executor_fn=_execute_transcribe,
+        request_id=request.headers.get("X-Request-ID"),
+        gpu=False,
+    )
+    return success_response({"task_id": task_id})
+
+
+def _execute_download(task: Task, params: dict) -> dict:
+    dt = _get_douyin_module()
+
+    cb = _make_progress_callback(task)
+    cb("downloading", 10, "下载抖音视频中...")
+
     session = dt._create_session()
     try:
-        _modal_id, page_url = dt.resolve_douyin_page_url(share_link, session=session)
+        _modal_id, page_url = dt.resolve_douyin_page_url(params["share_link"], session=session)
         play_url, title = dt.resolve_play_url(page_url, session=session)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             video_path = dt.download_video(
                 play_url, title, download_dir=tmpdir, session=session,
             )
+            cb("saving", 80, "保存文件...")
             storage = get_storage()
             file_id = storage.save(video_path, "douyin", f"{title}.mp4")
-    except APIError:
-        raise
-    except Exception as e:
-        raise APIError(ErrorCode.ENGINE_ERROR, f"Failed to download video: {e}")
     finally:
         session.close()
 
-    return success_response({
+    return {
         "file_id": file_id,
         "download_url": storage.get_url(file_id),
-    })
+    }
+
+
+@router.post("/download", status_code=202)
+async def download(req: DouyinDownloadRequest, request: Request):
+    dt = _get_douyin_module()
+    try:
+        share_link = dt.extract_douyin_share_link(req.share_link)
+    except Exception as e:
+        raise APIError(ErrorCode.VALIDATION_ERROR, f"Invalid share link: {e}", 400)
+
+    task_id = get_task_manager().submit(
+        task_type="douyin/download",
+        params={"share_link": share_link},
+        executor_fn=_execute_download,
+        request_id=request.headers.get("X-Request-ID"),
+        gpu=False,
+    )
+    return success_response({"task_id": task_id})
