@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -54,6 +55,11 @@ def _resolve_binary(
     which_path = shutil.which(binary_name)
     if which_path:
         candidates.append(Path(which_path).expanduser().resolve())
+
+    # Fallback: look next to the current Python interpreter (e.g. conda env)
+    conda_bin = Path(sys.executable).resolve().parent / binary_name
+    if conda_bin.exists():
+        candidates.append(conda_bin)
 
     for candidate in candidates:
         if candidate.exists() and candidate.is_file():

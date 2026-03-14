@@ -150,6 +150,10 @@ class DouyinDownloadRequest(BaseModel):
     callback_url: Optional[str] = None
 
 
+class DouyinExistingRequest(BaseModel):
+    file_id: str
+
+
 # ── Workflow (grouped config) ──
 
 

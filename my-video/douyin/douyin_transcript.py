@@ -240,12 +240,164 @@ def _resolve_play_url_from_html_regex(page_html: str) -> tuple[str, str]:
     raise TranscriptError("未从页面中解析到视频播放地址")
 
 
+def _get_douyin_cookies() -> str:
+    """Generate fresh Douyin cookies (ttwid + s_v_web_id) needed for API access."""
+    import uuid
+    requests = _import_required("requests", "缺少依赖 requests")
+
+    ttwid = ""
+    try:
+        resp = requests.post(
+            "https://ttwid.bytedance.com/ttwid/union/register/",
+            json={
+                "region": "cn", "aid": 6383, "needFid": False,
+                "service": "www.douyin.com",
+                "migrate_info": {"ticket": "", "source": "node"},
+                "cbUrlProtocol": "https", "union": True,
+            },
+            timeout=10,
+        )
+        for c in resp.cookies:
+            if c.name == "ttwid":
+                ttwid = c.value
+                break
+    except Exception:
+        pass
+
+    svid = f"verify_{uuid.uuid4().hex[:32]}"
+    mstoken = uuid.uuid4().hex + uuid.uuid4().hex[:16]
+    parts = [f"s_v_web_id={svid}", f"msToken={mstoken}"]
+    if ttwid:
+        parts.insert(0, f"ttwid={ttwid}")
+    return "; ".join(parts)
+
+
+def _resolve_play_url_f2_api(video_id: str, cookie: str | None = None) -> tuple[str, str]:
+    """Use f2 library to call Douyin API with proper ABogus signature."""
+    import asyncio
+    try:
+        from f2.apps.douyin.crawler import DouyinCrawler
+        from f2.apps.douyin.model import PostDetail
+    except ImportError:
+        raise TranscriptError("f2 库未安装")
+
+    cookie_str = cookie or _get_douyin_cookies()
+
+    kwargs = {
+        "cookie": cookie_str,
+        "headers": {
+            "User-Agent": DEFAULT_USER_AGENT,
+            "Referer": "https://www.douyin.com/",
+        },
+        "proxies": {"http://": None, "https://": None},
+    }
+
+    async def _fetch():
+        async with DouyinCrawler(kwargs) as crawler:
+            params = PostDetail(aweme_id=video_id)
+            return await crawler.fetch_post_detail(params)
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            result = pool.submit(lambda: asyncio.run(_fetch())).result(timeout=30)
+    else:
+        result = asyncio.run(_fetch())
+
+    if not result or not isinstance(result, dict):
+        raise TranscriptError("抖音 API 返回为空")
+
+    detail = result.get("aweme_detail")
+    if not detail:
+        filter_info = result.get("filter_detail", {})
+        reason = filter_info.get("filter_reason", "unknown")
+        raise TranscriptError(f"视频不可用 (reason: {reason})")
+
+    title = detail.get("desc", "")[:80] or "douyin_video"
+
+    video = detail.get("video", {})
+    play_addr = video.get("play_addr", {})
+    url_list = play_addr.get("url_list", [])
+    if not url_list:
+        # Try bit_rate fallback
+        bit_rate = video.get("bit_rate", [])
+        if bit_rate:
+            play_addr = bit_rate[0].get("play_addr", {})
+            url_list = play_addr.get("url_list", [])
+
+    if not url_list:
+        raise TranscriptError("API 返回中未找到播放地址")
+
+    play_url = url_list[0]
+    if not play_url.startswith("https://"):
+        play_url = "https://" + play_url.lstrip("/")
+
+    return play_url, title
+
+
+def _resolve_play_url_ytdlp(page_url: str, cookie: str | None = None) -> tuple[str, str]:
+    """Use yt-dlp to extract video play URL (more robust against anti-bot)."""
+    yt_dlp = _import_optional("yt_dlp")
+    if yt_dlp is None:
+        raise TranscriptError("yt-dlp 未安装")
+
+    ydl_opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "format": "best",
+    }
+    if cookie:
+        ydl_opts["http_headers"] = {"Cookie": cookie}
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(page_url, download=False)
+
+    if not info:
+        raise TranscriptError("yt-dlp 未能解析视频信息")
+
+    play_url = info.get("url")
+    if not play_url:
+        # Try formats list
+        formats = info.get("formats") or []
+        if formats:
+            play_url = formats[-1].get("url")
+
+    if not play_url:
+        raise TranscriptError("yt-dlp 未能获取视频播放地址")
+
+    title = info.get("title") or info.get("description", "")[:80] or "douyin_video"
+    return play_url, title
+
+
 def resolve_play_url(
     page_url: str,
     *,
     session,
     cookie: str | None = None,
 ) -> tuple[str, str]:
+    # Extract video ID from page URL
+    modal_id = _extract_modal_id_from_url(page_url)
+
+    # Method 1: f2 API with ABogus signature (most reliable)
+    if modal_id:
+        try:
+            return _resolve_play_url_f2_api(modal_id, cookie=_resolve_cookie(cookie))
+        except Exception:
+            pass
+
+    # Method 2: yt-dlp
+    try:
+        return _resolve_play_url_ytdlp(page_url, cookie=_resolve_cookie(cookie))
+    except Exception:
+        pass
+
+    # Method 3: direct HTML scraping (original fallback)
     response = session.get(
         page_url,
         headers=_build_headers(cookie=_resolve_cookie(cookie), accept_html=True),
@@ -264,6 +416,36 @@ def sanitize_filename(filename: str) -> str:
     sanitized = re.sub(r'[<>:"/\\|?*]', "_", filename).strip()
     sanitized = sanitized[:80]
     return sanitized or "douyin_video"
+
+
+def download_video_ytdlp(
+    page_url: str,
+    download_dir: str | Path = DEFAULT_DOWNLOAD_DIR,
+    *,
+    cookie: str | None = None,
+) -> tuple[Path, str]:
+    """Download video using f2 API + requests. Returns (video_path, title)."""
+    modal_id = _extract_modal_id_from_url(page_url)
+    if not modal_id:
+        raise TranscriptError(f"无法从 URL 提取视频 ID: {page_url}")
+
+    # Get play URL via f2 API
+    play_url, title = _resolve_play_url_f2_api(modal_id, cookie=_resolve_cookie(cookie))
+
+    # Download using requests
+    output_dir = Path(download_dir).expanduser().resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    session = _create_session(cookie)
+    try:
+        video_path = download_video(
+            play_url, sanitize_filename(title),
+            download_dir=output_dir, session=session, cookie=cookie,
+        )
+    finally:
+        session.close()
+
+    return video_path, title
 
 
 def download_video(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import platform
 import shutil
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -111,6 +112,11 @@ def resolve_ffmpeg_bin(ffmpeg_bin: str | os.PathLike | None = None) -> str:
     which_ffmpeg = shutil.which("ffmpeg")
     if which_ffmpeg:
         candidates.append(Path(which_ffmpeg))
+
+    # Fallback: look next to the current Python interpreter (e.g. conda env)
+    conda_ffmpeg = Path(sys.executable).resolve().parent / "ffmpeg"
+    if conda_ffmpeg.exists():
+        candidates.append(conda_ffmpeg)
 
     for candidate in candidates:
         if candidate.exists() and candidate.is_file():

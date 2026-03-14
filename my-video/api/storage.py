@@ -59,7 +59,14 @@ class LocalStorage(StorageBackend):
         if count:
             logger.info("Storage index rebuilt: %d files", count)
 
-    def save(self, source_path: str | Path, category: str, filename: str) -> str:
+    def save(
+        self,
+        source_path: str | Path,
+        category: str,
+        filename: str,
+        *,
+        tags: dict[str, str] | None = None,
+    ) -> str:
         source = Path(source_path)
         file_id = uuid.uuid4().hex
         suffix = source.suffix or Path(filename).suffix
@@ -83,6 +90,8 @@ class LocalStorage(StorageBackend):
             "created_at": time.time(),
             "size_bytes": dest.stat().st_size,
         }
+        if tags:
+            manifest["tags"] = tags
         manifest_path = category_dir / f"{file_id}.json"
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False))
 
@@ -136,6 +145,44 @@ class LocalStorage(StorageBackend):
         if count:
             logger.info("Storage cleanup: removed %d expired files", count)
         return count
+
+    def list_category(self, category: str) -> list[dict]:
+        """List all files in a category, sorted by created_at descending."""
+        results = []
+        with self._lock:
+            candidates = list(self._index.items())
+        for file_id, manifest_path in candidates:
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if manifest.get("category") != category:
+                continue
+            data_path = self.root / category / manifest["stored_name"]
+            if not data_path.exists():
+                continue
+            results.append(manifest)
+        results.sort(key=lambda m: m.get("created_at", 0), reverse=True)
+        return results
+
+    def find_by_tag(self, category: str, tag_key: str, tag_value: str) -> dict | None:
+        """Find a file by tag within a category. Returns manifest dict or None."""
+        with self._lock:
+            candidates = list(self._index.items())
+        for file_id, manifest_path in candidates:
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if manifest.get("category") != category:
+                continue
+            tags = manifest.get("tags") or {}
+            if tags.get(tag_key) == tag_value:
+                # Verify the data file still exists
+                data_path = self.root / category / manifest["stored_name"]
+                if data_path.exists():
+                    return manifest
+        return None
 
     def _load_manifest(self, file_id: str) -> dict:
         with self._lock:

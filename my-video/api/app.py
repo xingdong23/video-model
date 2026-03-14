@@ -153,7 +153,7 @@ def create_app():
         return info
 
     # ── Routers ──
-    from .routers import voice, digital_human, subtitle, bgm, rewrite, douyin, workflow, files, tasks
+    from .routers import voice, digital_human, subtitle, bgm, rewrite, douyin, workflow, files, tasks, projects
     app.include_router(voice.router, prefix="/api/v1/voice", tags=["voice"])
     app.include_router(digital_human.router, prefix="/api/v1/digital-human", tags=["digital-human"])
     app.include_router(subtitle.router, prefix="/api/v1/subtitle", tags=["subtitle"])
@@ -163,6 +163,7 @@ def create_app():
     app.include_router(workflow.router, prefix="/api/v1/workflow", tags=["workflow"])
     app.include_router(files.router, prefix="/api/v1/files", tags=["files"])
     app.include_router(tasks.router, prefix="/api/v1/tasks", tags=["tasks"])
+    app.include_router(projects.router, prefix="/api/v1/projects", tags=["projects"])
 
     # ── Static frontend ──
     from pathlib import Path
