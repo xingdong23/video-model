@@ -11,7 +11,7 @@
   --purple: #7c5cfc; --purple2: #6344e8; --purple-bg: rgba(124,92,252,.12);
   --green: #34d399; --green-bg: rgba(52,211,153,.1);
   --red: #f87171; --red-bg: rgba(248,113,113,.1);
-  --blue: #60a5fa; --yellow: #fbbf24; --orange: #fb923c;
+  --blue: #60a5fa; --yellow: #fbbf24;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
@@ -23,8 +23,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft
 .header .badge { font-size: 11px; padding: 3px 10px; border-radius: 10px; font-weight: 500; }
 .badge-online { background: var(--green-bg); color: var(--green); }
 .badge-offline { background: var(--red-bg); color: var(--red); }
-.header .gpu-tag { margin-left: auto; font-size: 12px; color: var(--text2); background: var(--bg3); padding: 4px 12px; border-radius: 6px; }
-.header .queue-info { font-size: 12px; color: var(--text2); background: var(--bg3); padding: 4px 12px; border-radius: 6px; }
+.header .gpu-tag { font-size: 12px; color: var(--text2); background: var(--bg3); padding: 4px 12px; border-radius: 6px; }
 
 /* Steps container */
 .pipeline { padding: 24px 32px 60px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
@@ -32,27 +31,13 @@ body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft
 @media (max-width: 900px) { .pipeline { grid-template-columns: 1fr; } }
 
 /* Step card */
-.step { background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
+.step { background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
 .step-header { padding: 14px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
 .step-num { width: 28px; height: 28px; border-radius: 50%; background: var(--purple); color: #fff; font-size: 14px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .step-num.done { background: var(--green); }
 .step-title { font-size: 16px; font-weight: 600; color: var(--white); }
-.step-status { margin-left: auto; font-size: 11px; padding: 2px 8px; border-radius: 8px; white-space: nowrap; }
-.step-body { padding: 16px 20px; flex: 1; }
-
-/* Progress bar */
-.progress-wrap { margin-top: 12px; display: none; }
-.progress-wrap.show { display: block; }
-.progress-bar-outer { width: 100%; height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; }
-.progress-bar-inner { height: 100%; background: linear-gradient(90deg, var(--purple), var(--blue)); border-radius: 3px; transition: width .3s ease; width: 0%; }
-.progress-bar-inner.done { background: linear-gradient(90deg, var(--green), #2dd4bf); }
-.progress-bar-inner.err { background: var(--red); }
-.progress-info { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
-.progress-pct { font-size: 13px; font-weight: 600; color: var(--purple); }
-.progress-pct.done { color: var(--green); }
-.progress-pct.err { color: var(--red); }
-.progress-msg { font-size: 12px; color: var(--text2); }
-.progress-step { font-size: 11px; color: var(--text2); background: var(--bg3); padding: 2px 8px; border-radius: 4px; margin-top: 4px; display: inline-block; }
+.step-status { margin-left: auto; font-size: 11px; padding: 2px 8px; border-radius: 8px; }
+.step-body { padding: 16px 20px; }
 
 /* Form elements */
 .fg { margin-bottom: 14px; }
@@ -123,16 +108,20 @@ body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft
 .upload-area .text { font-size: 13px; color: var(--text2); }
 .upload-area .filename { font-size: 13px; color: var(--green); font-weight: 600; }
 
+/* Progress bar */
+.progress-wrap { margin-top: 10px; display: none; }
+.progress-wrap.show { display: block; }
+.progress-bar-outer { height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; }
+.progress-bar-inner { height: 100%; background: linear-gradient(90deg, var(--purple), var(--blue)); border-radius: 3px; transition: width .3s ease; width: 0%; }
+.progress-info { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; font-size: 11px; color: var(--text2); }
+.progress-step { color: var(--purple); font-weight: 500; }
+.progress-pct { color: var(--blue); font-weight: 600; }
+
 /* Status log at bottom */
 .log-bar { position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg2); border-top: 1px solid var(--border); padding: 6px 32px; font-size: 12px; color: var(--text2); display: flex; align-items: center; gap: 12px; z-index: 100; }
 .log-bar .dot { width: 6px; height: 6px; border-radius: 50%; }
 .log-bar .dot.on { background: var(--green); }
 .log-bar .dot.off { background: var(--red); }
-
-/* Task ID tag */
-.task-tag { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; background: var(--bg3); border: 1px solid var(--border); border-radius: 6px; font-size: 11px; color: var(--text2); margin-top: 6px; font-family: "SF Mono", Monaco, monospace; }
-.task-tag .cancel-btn { background: none; border: none; color: var(--red); cursor: pointer; font-size: 12px; padding: 0 2px; opacity: .7; }
-.task-tag .cancel-btn:hover { opacity: 1; }
 </style>
 </head>
 <body>
@@ -141,6 +130,13 @@ body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft
   <div class="logo">my-<span>video</span></div>
   <span class="badge" id="statusBadge">--</span>
   <span class="gpu-tag" id="gpuInfo">GPU: --</span>
+  <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+    <select id="project-select" onchange="onProjectSelect(this.value)" style="padding:6px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;min-width:200px">
+      <option value="">-- 选择项目 --</option>
+    </select>
+    <button onclick="createNewProject()" class="btn btn-outline btn-sm" style="white-space:nowrap">新建项目</button>
+    <button onclick="deleteCurrentProject()" class="btn btn-outline btn-sm" style="white-space:nowrap;color:var(--red);border-color:var(--red)" title="删除当前项目">删除</button>
+  </div>
 </div>
 
 <div class="pipeline">
@@ -156,10 +152,24 @@ body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft
         <label>抖音分享链接</label>
         <input type="text" id="dy-link" placeholder="粘贴抖音分享链接...">
       </div>
-      <div class="fg-row">
-        <button class="btn btn-main" id="btn-dy-extract" onclick="douyinExtract()">提取文案</button>
+      <button class="btn btn-main" id="btn-dy-extract" onclick="douyinExtract()">提取文案</button>
+
+      <div style="display:flex;align-items:center;gap:10px;margin:14px 0">
+        <div style="flex:1;height:1px;background:var(--border)"></div>
+        <span style="font-size:12px;color:var(--text2);white-space:nowrap">或从已下载视频选择</span>
+        <div style="flex:1;height:1px;background:var(--border)"></div>
       </div>
-      <div class="progress-wrap" id="dy-progress"></div>
+
+      <div class="fg">
+        <select id="dy-existing" style="cursor:pointer">
+          <option value="">加载中...</option>
+        </select>
+      </div>
+      <div class="preview" id="dy-existing-preview" style="margin-bottom:12px"></div>
+      <div id="dy-existing-projects" style="display:none;margin-bottom:12px"></div>
+      <button class="btn btn-main" id="btn-dy-existing" onclick="douyinTranscribeExisting()" style="background:var(--bg3);color:var(--text);border:1px solid var(--border)" disabled>重新提取文案</button>
+
+      <div class="progress-wrap" id="dy-progress"><div class="progress-bar-outer"><div class="progress-bar-inner" id="dy-progress-bar"></div></div><div class="progress-info"><span class="progress-step" id="dy-progress-step"></span><span class="progress-pct" id="dy-progress-pct"></span></div></div>
       <div class="result" id="dy-res"></div>
       <div class="preview" id="dy-preview"></div>
     </div>
@@ -190,7 +200,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft
         <label>改写指令</label>
         <textarea id="rewrite-instruction" placeholder="例如：改为更加口语化的风格..." rows="2"></textarea>
       </div>
-      <button class="btn btn-main" id="btn-rewrite" onclick="rewriteScript()">确认文案</button>
+      <button class="btn btn-main" id="btn-rewrite" onclick="rewriteScript()">执行改写</button>
       <div class="result" id="rewrite-res"></div>
     </div>
   </div>
@@ -230,7 +240,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft
         <input type="text" id="v-prompt-text" placeholder="参考音频里说的话（克隆时必填）">
       </div>
       <button class="btn btn-main" id="btn-tts" onclick="generateAudio()">生成音频</button>
-      <div class="progress-wrap" id="tts-progress"></div>
+      <div class="progress-wrap" id="tts-progress"><div class="progress-bar-outer"><div class="progress-bar-inner" id="tts-progress-bar"></div></div><div class="progress-info"><span class="progress-step" id="tts-progress-step"></span><span class="progress-pct" id="tts-progress-pct"></span></div></div>
       <div class="result" id="tts-res"></div>
       <div class="preview" id="tts-preview"></div>
     </div>
@@ -278,7 +288,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft
         </div>
       </div>
       <button class="btn btn-main" id="btn-dh" onclick="generateVideo()">生成数字人视频</button>
-      <div class="progress-wrap" id="dh-progress"></div>
+      <div class="hint" style="margin-top:6px">通常需要 30-60 秒</div>
+      <div class="progress-wrap" id="dh-progress"><div class="progress-bar-outer"><div class="progress-bar-inner" id="dh-progress-bar"></div></div><div class="progress-info"><span class="progress-step" id="dh-progress-step"></span><span class="progress-pct" id="dh-progress-pct"></span></div></div>
       <div class="result" id="dh-res"></div>
       <div class="preview" id="dh-preview"></div>
     </div>
@@ -329,11 +340,17 @@ body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft
         </div>
       </div>
       <button class="btn btn-main" id="btn-sub" onclick="generateSubtitle()">生成字幕</button>
-      <div class="progress-wrap" id="sub-progress"></div>
+      <div class="progress-wrap" id="sub-progress"><div class="progress-bar-outer"><div class="progress-bar-inner" id="sub-progress-bar"></div></div><div class="progress-info"><span class="progress-step" id="sub-progress-step"></span><span class="progress-pct" id="sub-progress-pct"></span></div></div>
       <div class="result" id="sub-res"></div>
+      <div class="fg" id="sub-srt-group" style="display:none;margin-top:12px">
+        <label>字幕内容</label>
+        <select id="sub-srt-type" style="margin-bottom:6px">
+          <option value="preview">字幕预览</option>
+        </select>
+      </div>
       <div class="divider" id="sub-divider" style="display:none"></div>
-      <button class="btn btn-main" id="btn-burn" onclick="burnSubtitle()" style="display:none">烧录字幕到视频</button>
-      <div class="progress-wrap" id="burn-progress"></div>
+      <button class="btn btn-main" id="btn-burn" onclick="burnSubtitle()" style="display:none">烧录字幕</button>
+      <div class="progress-wrap" id="burn-progress"><div class="progress-bar-outer"><div class="progress-bar-inner" id="burn-progress-bar"></div></div><div class="progress-info"><span class="progress-step" id="burn-progress-step"></span><span class="progress-pct" id="burn-progress-pct"></span></div></div>
       <div class="result" id="burn-res"></div>
       <div class="preview" id="burn-preview"></div>
     </div>
@@ -362,8 +379,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft
       </div>
       <div style="display:flex;gap:16px;margin-bottom:14px">
         <div class="cb">
-          <input type="checkbox" id="bgm-random-check">
-          <label for="bgm-random-check">随机选择</label>
+          <input type="checkbox" id="bgm-custom-check">
+          <label for="bgm-custom-check">自定义添加BGM</label>
         </div>
         <div class="cb">
           <input type="checkbox" id="bgm-none-check">
@@ -380,8 +397,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft
           <input type="number" id="bgm-orig" value="1.0" min="0" max="1" step="0.05">
         </div>
       </div>
-      <button class="btn btn-main" id="btn-bgm" onclick="addBgm()">混合背景音乐</button>
-      <div class="progress-wrap" id="bgm-progress"></div>
+      <button class="btn btn-main" id="btn-bgm" onclick="addBgm()">自动生成BGM</button>
+      <div class="progress-wrap" id="bgm-progress"><div class="progress-bar-outer"><div class="progress-bar-inner" id="bgm-progress-bar"></div></div><div class="progress-info"><span class="progress-step" id="bgm-progress-step"></span><span class="progress-pct" id="bgm-progress-pct"></span></div></div>
       <div class="result" id="bgm-res"></div>
       <div class="preview" id="bgm-preview"></div>
     </div>
@@ -398,18 +415,20 @@ body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft
 const API = window.location.origin;
 
 // ── Global state (file IDs passed between steps) ──
-const state = {
-  scriptText: '',
-  audioFileId: null,
-  videoFileId: null,
-  uploadVideoFileId: null,
-  srtFileId: null,
-  burnedVideoFileId: null,
-  finalVideoFileId: null,
+const _defaultState = {
+  projectId: null,      // Current project ID
+  scriptText: '',       // Step 1/2 output
+  douyinVideoFileId: null, // Step 1 source video
+  audioFileId: null,    // Step 3 output
+  videoFileId: null,    // Step 4 output (digital human video)
+  uploadVideoFileId: null, // Step 4 uploaded custom video
+  srtFileId: null,      // Step 5 SRT output
+  burnedVideoFileId: null, // Step 5 burned video
+  finalVideoFileId: null,  // Current latest video file_id
 };
+const state = Object.assign({}, _defaultState, JSON.parse(localStorage.getItem('mv_state') || '{}'));
 
-// ── Active SSE connections (for cleanup) ──
-const activeStreams = {};
+function saveState() { localStorage.setItem('mv_state', JSON.stringify(state)); }
 
 // ── Utils ──
 function log(msg) { document.getElementById('logText').textContent = msg; }
@@ -420,12 +439,226 @@ function showRes(id, data, isErr) {
   el.className = 'result show ' + (isErr ? 'err' : 'ok');
   el.textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
 }
+function hideRes(id) { const el = $(id); if (el) { el.className = 'result'; el.textContent = ''; } }
 
 function markDone(n) { $('sn' + n).classList.add('done'); }
+function markUndone(n) { $('sn' + n).classList.remove('done'); }
+
+function resetUI() {
+  // Clear all step outputs and previews
+  ['dy-res','tts-res','dh-res','sub-res','burn-res','bgm-res','rewrite-res'].forEach(hideRes);
+  $('dy-preview').innerHTML = '';
+  $('dy-existing-preview').innerHTML = '';
+  $('dy-existing-projects').style.display = 'none';
+  $('dy-existing-projects').innerHTML = '';
+  $('dy-existing').selectedIndex = 0;
+  $('btn-dy-existing').disabled = true;
+  $('btn-dy-existing').style.background = 'var(--bg3)';
+  $('btn-dy-existing').style.color = 'var(--text)';
+  $('btn-dy-existing').style.border = '1px solid var(--border)';
+  $('tts-preview').innerHTML = '';
+  $('dh-preview').innerHTML = '';
+  $('burn-preview').innerHTML = '';
+  $('bgm-preview').innerHTML = '';
+  $('script-text').value = '';
+  $('dy-link').value = '';
+  $('sub-divider').style.display = 'none';
+  $('btn-burn').style.display = 'none';
+  $('upload-video-info').style.display = 'none';
+  for (let i = 1; i <= 6; i++) markUndone(i);
+}
+
+function applyStateToUI() {
+  resetUI();
+  // Step 1/2: script text + source video info
+  if (state.scriptText) {
+    $('script-text').value = state.scriptText;
+    markDone(1);
+    markDone(2);
+  }
+  if (state.douyinVideoFileId) {
+    showRes('dy-res', '(已恢复) 素材视频: ' + state.douyinVideoFileId);
+    const link = document.createElement('div');
+    link.style.cssText = 'text-align:center;padding:8px';
+    link.innerHTML = '<a href="javascript:void(0)" style="color:var(--purple);font-size:13px">点击查看素材视频</a>';
+    link.querySelector('a').onclick = function() { $('dy-preview').innerHTML = videoPlayer(state.douyinVideoFileId); };
+    $('dy-preview').innerHTML = '';
+    $('dy-preview').appendChild(link);
+  } else if (state.scriptText) {
+    showRes('dy-res', '(已恢复) 文案已加载');
+  }
+  // Step 3: audio
+  if (state.audioFileId) {
+    $('tts-preview').innerHTML = audioPlayer(state.audioFileId);
+    showRes('tts-res', '(已恢复) file_id: ' + state.audioFileId);
+    markDone(3);
+  }
+  // Step 4: digital human video
+  if (state.videoFileId) {
+    $('dh-preview').innerHTML = videoPlayer(state.videoFileId);
+    showRes('dh-res', '(已恢复) file_id: ' + state.videoFileId);
+    markDone(4);
+  }
+  if (state.uploadVideoFileId) {
+    $('upload-video-info').style.display = 'block';
+    $('upload-video-tag').textContent = 'file_id: ' + state.uploadVideoFileId;
+  }
+  // Step 5: subtitle
+  if (state.srtFileId) {
+    showRes('sub-res', '(已恢复) SRT file_id: ' + state.srtFileId);
+    $('sub-divider').style.display = 'block';
+    $('btn-burn').style.display = 'block';
+    markDone(5);
+  }
+  if (state.burnedVideoFileId) {
+    $('burn-preview').innerHTML = videoPlayer(state.burnedVideoFileId);
+  }
+  // Step 6: final video with BGM
+  if (state.finalVideoFileId && state.finalVideoFileId !== state.videoFileId) {
+    showRes('bgm-res', '(已恢复) file_id: ' + state.finalVideoFileId);
+    $('bgm-preview').innerHTML = videoPlayer(state.finalVideoFileId);
+    markDone(6);
+  }
+}
+
+// Format helpers
+function fmtTime(ts) {
+  const d = new Date(ts * 1000);
+  return (d.getMonth()+1) + '/' + d.getDate() + ' ' + d.getHours() + ':' + String(d.getMinutes()).padStart(2,'0');
+}
+
+// ── Project management ──
+async function loadProjectList() {
+  try {
+    const r = await api('GET', '/api/v1/projects');
+    if (!r.success) return;
+    const sel = $('project-select');
+    // Keep only the placeholder option
+    sel.innerHTML = '<option value="">-- 选择项目 --</option>';
+    (r.data || []).forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.project_id;
+      const title = p.title ? p.title.substring(0, 30) : '未命名项目';
+      opt.textContent = title + ' (' + fmtTime(p.updated_at) + ', ' + p.steps_done + '步)';
+      if (p.project_id === state.projectId) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  } catch (e) {
+    console.warn('Failed to load projects:', e);
+  }
+}
+
+function createNewProject() {
+  // Just reset UI — project will be created lazily by ensureProject() when first step completes
+  Object.assign(state, _defaultState);
+  saveState();
+  resetUI();
+  $('project-select').value = '';
+  log('已重置，开始新流程');
+}
+
+async function deleteCurrentProject() {
+  if (!state.projectId) { log('没有选中的项目'); return; }
+  if (!confirm('确认删除当前项目？')) return;
+  try {
+    await api('DELETE', '/api/v1/projects/' + state.projectId);
+    Object.assign(state, _defaultState);
+    saveState();
+    resetUI();
+    await loadProjectList();
+    log('项目已删除');
+  } catch (e) { log('删除失败: ' + e.message); }
+}
+
+async function onProjectSelect(projectId) {
+  if (!projectId) {
+    // Deselected — clear state
+    Object.assign(state, _defaultState);
+    saveState();
+    resetUI();
+    log('已取消选择项目');
+    return;
+  }
+  try {
+    const r = await api('GET', '/api/v1/projects/' + projectId);
+    if (!r.success) { log('加载项目失败'); return; }
+    restoreProjectData(r.data);
+    log('已加载项目: ' + (r.data.title || projectId));
+  } catch (e) { log('加载项目失败: ' + e.message); }
+}
+
+function restoreProjectData(proj) {
+  // Map project steps back to state
+  Object.assign(state, _defaultState);
+  state.projectId = proj.project_id;
+  const s = proj.steps || {};
+  if (s.douyin) {
+    state.scriptText = s.douyin.transcript || '';
+    state.douyinVideoFileId = s.douyin.video_file_id || null;
+  }
+  if (s.script) {
+    state.scriptText = s.script.text || state.scriptText;
+  }
+  if (s.voice) {
+    state.audioFileId = s.voice.file_id || null;
+  }
+  if (s.digital_human) {
+    state.videoFileId = s.digital_human.file_id || null;
+    state.finalVideoFileId = s.digital_human.file_id || null;
+    state.uploadVideoFileId = s.digital_human.upload_video_file_id || null;
+  }
+  if (s.subtitle) {
+    state.srtFileId = s.subtitle.srt_file_id || null;
+    if (s.subtitle.burned_file_id) {
+      state.burnedVideoFileId = s.subtitle.burned_file_id;
+      state.finalVideoFileId = s.subtitle.burned_file_id;
+    }
+  }
+  if (s.bgm) {
+    if (s.bgm.file_id) {
+      state.finalVideoFileId = s.bgm.file_id;
+    }
+  }
+  saveState();
+  applyStateToUI();
+}
+
+/** Save a step result to the current project on the server. */
+async function saveStep(step, data) {
+  if (!state.projectId) return;
+  try {
+    await api('PUT', '/api/v1/projects/' + state.projectId + '/steps/' + step, { data });
+    // Refresh project list to update title/steps count
+    loadProjectList();
+  } catch (e) {
+    console.warn('Failed to save step:', e);
+  }
+}
+
+/** Ensure a project exists; creates one if needed. Returns projectId. */
+async function ensureProject() {
+  if (state.projectId) return state.projectId;
+  const r = await api('POST', '/api/v1/projects', { title: '' });
+  if (!r.success) throw new Error('创建项目失败');
+  state.projectId = r.data.project_id;
+  saveState();
+  loadProjectList();
+  return state.projectId;
+}
+
+async function restoreState() {
+  // Load project list and existing videos in parallel
+  await Promise.all([loadProjectList(), loadExistingVideos()]);
+  // If we had a project selected, restore UI from local state
+  if (state.projectId && (state.scriptText || state.audioFileId || state.videoFileId)) {
+    applyStateToUI();
+    log('已恢复项目状态');
+  }
+}
 
 function loading(btnId, on) {
   const btn = $(btnId);
-  if (on) { btn.disabled = true; btn._t = btn.textContent; btn.innerHTML = '<span class="spinner"></span> 提交中...'; }
+  if (on) { btn.disabled = true; btn._t = btn.textContent; btn.innerHTML = '<span class="spinner"></span> 处理中...'; }
   else { btn.disabled = false; btn.textContent = btn._t || '提交'; }
 }
 
@@ -447,126 +680,66 @@ function videoPlayer(fid) {
     <div style="margin-top:6px"><span class="file-tag">${fid}</span> <a class="dl-link" href="${API}/api/v1/files/${fid}" download>下载</a></div>`;
 }
 
-// ── Progress bar management ──
-function initProgress(progressId) {
-  const wrap = $(progressId);
-  wrap.classList.add('show');
-  wrap.innerHTML = `
-    <div class="progress-bar-outer"><div class="progress-bar-inner"></div></div>
-    <div class="progress-info">
-      <span class="progress-pct">0%</span>
-      <span class="progress-msg">排队中...</span>
-    </div>`;
-}
+// ── Task polling ──
+const STATUS_LABELS = { queued: '排队中', processing: '处理中', completed: '已完成', failed: '失败', cancelled: '已取消' };
 
-function updateProgress(progressId, pct, msg, step, status) {
-  const wrap = $(progressId);
+function showProgress(prefix, step, progress, message) {
+  const wrap = $(prefix + '-progress');
   if (!wrap) return;
-  const bar = wrap.querySelector('.progress-bar-inner');
-  const pctEl = wrap.querySelector('.progress-pct');
-  const msgEl = wrap.querySelector('.progress-msg');
-  if (bar) {
-    bar.style.width = pct + '%';
-    bar.className = 'progress-bar-inner' + (status === 'completed' ? ' done' : status === 'failed' ? ' err' : '');
-  }
-  if (pctEl) {
-    pctEl.textContent = pct + '%';
-    pctEl.className = 'progress-pct' + (status === 'completed' ? ' done' : status === 'failed' ? ' err' : '');
-  }
-  if (msgEl) msgEl.textContent = msg || '';
+  wrap.classList.add('show');
+  $(prefix + '-progress-bar').style.width = progress + '%';
+  $(prefix + '-progress-step').textContent = message || step || '';
+  $(prefix + '-progress-pct').textContent = progress > 0 ? progress + '%' : '';
 }
 
-// ── SSE-based task tracking ──
-function trackTask(taskId, progressId, { onCompleted, onFailed, btnId }) {
-  // Close any existing stream for this progress bar
-  if (activeStreams[progressId]) {
-    activeStreams[progressId].close();
-  }
-
-  initProgress(progressId);
-
-  const es = new EventSource(`${API}/api/v1/tasks/${taskId}/stream`);
-  activeStreams[progressId] = es;
-
-  es.addEventListener('progress', (e) => {
-    const d = JSON.parse(e.data);
-    updateProgress(progressId, d.progress, d.message, d.step, d.status);
-    log(`[${d.progress}%] ${d.message || d.step || ''}`);
-  });
-
-  es.addEventListener('completed', (e) => {
-    const d = JSON.parse(e.data);
-    updateProgress(progressId, 100, '完成', 'completed', 'completed');
-    es.close();
-    delete activeStreams[progressId];
-    if (btnId) loading(btnId, false);
-    if (onCompleted) onCompleted(d.result);
-  });
-
-  es.addEventListener('failed', (e) => {
-    const d = JSON.parse(e.data);
-    updateProgress(progressId, d.progress || 0, d.error || '任务失败', 'failed', 'failed');
-    es.close();
-    delete activeStreams[progressId];
-    if (btnId) loading(btnId, false);
-    if (onFailed) onFailed(d.error);
-  });
-
-  es.addEventListener('cancelled', (e) => {
-    updateProgress(progressId, 0, '已取消', 'cancelled', 'failed');
-    es.close();
-    delete activeStreams[progressId];
-    if (btnId) loading(btnId, false);
-    if (onFailed) onFailed('任务已取消');
-  });
-
-  es.addEventListener('error', (e) => {
-    // SSE connection error or task not found
-    if (es.readyState === EventSource.CLOSED) return;
-    // Fall back to polling
-    es.close();
-    delete activeStreams[progressId];
-    pollTask(taskId, progressId, { onCompleted, onFailed, btnId });
-  });
+function hideProgress(prefix) {
+  const wrap = $(prefix + '-progress');
+  if (wrap) wrap.classList.remove('show');
 }
 
-// ── Polling fallback ──
-async function pollTask(taskId, progressId, { onCompleted, onFailed, btnId }) {
-  const poll = async () => {
+/**
+ * Poll a task until completed or failed.
+ * Returns the task result on success, throws on failure.
+ */
+async function pollTask(taskId, prefix, logPrefix) {
+  const INTERVAL = 1500;
+  showProgress(prefix, '排队中', 0, '任务已提交，等待处理...');
+  log(logPrefix + ' - 任务 ' + taskId + ' 排队中...');
+
+  while (true) {
+    await new Promise(r => setTimeout(r, INTERVAL));
+    let task;
     try {
-      const r = await api('GET', `/api/v1/tasks/${taskId}`);
-      if (!r.success) { if (onFailed) onFailed(r.error?.message || '查询失败'); if (btnId) loading(btnId, false); return; }
-      const d = r.data;
-      updateProgress(progressId, d.progress, d.message, d.step, d.status);
-      log(`[${d.progress}%] ${d.message || d.step || ''}`);
-
-      if (d.status === 'completed') {
-        updateProgress(progressId, 100, '完成', 'completed', 'completed');
-        if (btnId) loading(btnId, false);
-        if (onCompleted) onCompleted(d.result);
-      } else if (d.status === 'failed') {
-        updateProgress(progressId, d.progress || 0, d.error || '任务失败', 'failed', 'failed');
-        if (btnId) loading(btnId, false);
-        if (onFailed) onFailed(d.error);
-      } else if (d.status === 'cancelled') {
-        updateProgress(progressId, 0, '已取消', 'cancelled', 'failed');
-        if (btnId) loading(btnId, false);
-        if (onFailed) onFailed('任务已取消');
-      } else {
-        setTimeout(poll, 2000);
+      const r = await api('GET', '/api/v1/tasks/' + taskId);
+      if (!r.success) {
+        hideProgress(prefix);
+        throw new Error(r.error?.message || '任务查询失败');
       }
+      task = r.data;
     } catch (e) {
-      setTimeout(poll, 3000);
+      if (e.message && e.message.includes('任务查询失败')) throw e;
+      // Network error, keep polling
+      continue;
     }
-  };
-  poll();
-}
 
-// ── Submit async task (returns task_id from 202) ──
-async function submitTask(method, path, body) {
-  const r = await api(method, path, body);
-  if (!r.success) throw new Error(r.error?.message || '提交失败');
-  return r.data.task_id;
+    const status = task.status;
+    const step = task.step || '';
+    const progress = task.progress || 0;
+    const message = task.message || STATUS_LABELS[status] || status;
+
+    showProgress(prefix, step, progress, message);
+    log(logPrefix + ' - ' + message + (progress > 0 ? ' (' + progress + '%)' : ''));
+
+    if (status === 'completed') {
+      showProgress(prefix, step, 100, '完成!');
+      setTimeout(() => hideProgress(prefix), 2000);
+      return task.result;
+    }
+    if (status === 'failed' || status === 'cancelled') {
+      hideProgress(prefix);
+      throw new Error(task.error || '任务' + STATUS_LABELS[status]);
+    }
+  }
 }
 
 // ── Init: health check + load lists ──
@@ -586,8 +759,9 @@ async function init() {
       $('gpuInfo').textContent = 'GPU: ' + d.name + ' (' + d.total_memory_gb + 'GB)';
     } else { $('gpuInfo').textContent = 'GPU: N/A'; }
   } catch {}
-  // Load lists
+  // Load lists & restore previous project
   refreshSpeakers(); refreshFaces(); refreshTracks();
+  await restoreState();
 }
 init();
 
@@ -626,44 +800,161 @@ document.querySelectorAll('input[name="rewrite-mode"]').forEach(r => {
   });
 });
 
-// ── STEP 1: Douyin (async task) ──
+// ── STEP 1: Douyin ──
 async function douyinExtract() {
   const link = $('dy-link').value.trim();
   if (!link) { showRes('dy-res', '请输入抖音分享链接', true); return; }
   loading('btn-dy-extract', true);
-  log('正在提交抖音文案提取任务...');
+  log('正在提取抖音视频文案...');
   try {
-    const taskId = await submitTask('POST', '/api/v1/douyin/transcribe', { share_link: link });
-    log('任务已提交: ' + taskId);
+    await ensureProject();
+    const r = await api('POST', '/api/v1/douyin/transcribe', { share_link: link });
+    if (!r.success) { showRes('dy-res', r.error?.message || '提取失败', true); log('文案提取失败'); loading('btn-dy-extract', false); return; }
 
-    trackTask(taskId, 'dy-progress', {
-      btnId: 'btn-dy-extract',
-      onCompleted: (result) => {
-        showRes('dy-res', result);
-        if (result.transcript) {
-          $('script-text').value = result.transcript;
-          state.scriptText = result.transcript;
-        }
-        if (result.files?.length) {
-          const vf = result.files.find(f => f.filename?.endsWith('.mp4'));
-          if (vf) $('dy-preview').innerHTML = videoPlayer(vf.file_id);
-        }
-        markDone(1);
-        log('文案提取完成');
-      },
-      onFailed: (err) => {
-        showRes('dy-res', err || '提取失败', true);
-        log('文案提取失败');
-      },
-    });
+    // Async task: poll for result
+    const taskId = r.data.task_id;
+    const result = await pollTask(taskId, 'dy', '文案提取');
+
+    showRes('dy-res', result);
+    const stepData = { transcript: '', files: [] };
+    if (result.transcript) {
+      $('script-text').value = result.transcript;
+      state.scriptText = result.transcript;
+      stepData.transcript = result.transcript;
+    }
+    if (result.files?.length) {
+      stepData.files = result.files;
+      const vf = result.files.find(f => f.filename?.endsWith('.mp4'));
+      if (vf) {
+        stepData.video_file_id = vf.file_id;
+        state.douyinVideoFileId = vf.file_id;
+        $('dy-preview').innerHTML = videoPlayer(vf.file_id);
+      }
+    }
+    saveState();
+    saveStep('douyin', stepData);
+    markDone(1);
+    log('文案提取完成');
+    loadExistingVideos();
+  } catch (e) { showRes('dy-res', e.message, true); log('文案提取失败: ' + e.message); }
+  loading('btn-dy-extract', false);
+}
+
+// ── STEP 1b: Existing video selection ──
+let _existingVideos = []; // cached video list with projects
+
+async function loadExistingVideos() {
+  const sel = $('dy-existing');
+  try {
+    const r = await api('GET', '/api/v1/douyin/videos');
+    sel.innerHTML = '<option value="">-- 选择已下载的视频 --</option>';
+    if (r.success && r.data?.videos?.length) {
+      _existingVideos = r.data.videos;
+      r.data.videos.forEach(v => {
+        const opt = document.createElement('option');
+        opt.value = v.file_id;
+        const projCount = v.projects?.length || 0;
+        opt.textContent = v.filename + ' (' + v.size_mb + 'MB' + (projCount ? ', ' + projCount + '个项目' : '') + ')';
+        sel.appendChild(opt);
+      });
+    } else {
+      _existingVideos = [];
+      sel.innerHTML = '<option value="">暂无已下载视频</option>';
+    }
   } catch (e) {
-    showRes('dy-res', e.message, true);
-    log('提交失败');
-    loading('btn-dy-extract', false);
+    _existingVideos = [];
+    sel.innerHTML = '<option value="">加载失败</option>';
   }
 }
 
-// ── STEP 2: Rewrite (sync) ──
+function _renderVideoProjects(video) {
+  const box = $('dy-existing-projects');
+  const projects = video?.projects || [];
+  if (!projects.length) { box.style.display = 'none'; return; }
+  box.style.display = 'block';
+  box.innerHTML = '<div style="font-size:13px;font-weight:600;margin-bottom:8px;color:var(--text2)">关联项目（点击恢复完整流程）</div>' +
+    projects.map(p => {
+      const title = p.title ? p.title.substring(0, 40) : '未命名项目';
+      return '<div onclick="restoreVideoProject(\'' + p.project_id + '\')" style="cursor:pointer;padding:8px 12px;margin-bottom:4px;background:var(--bg);border:1px solid var(--border);border-radius:8px;display:flex;justify-content:space-between;align-items:center;transition:border-color .2s" onmouseover="this.style.borderColor=\'var(--purple)\'" onmouseout="this.style.borderColor=\'var(--border)\'">' +
+        '<span style="font-size:13px">' + title + '</span>' +
+        '<span style="font-size:11px;color:var(--text2)">' + p.steps_done + '步 · ' + fmtTime(p.updated_at) + '</span>' +
+      '</div>';
+    }).join('');
+}
+
+async function restoreVideoProject(projectId) {
+  try {
+    const r = await api('GET', '/api/v1/projects/' + projectId);
+    if (!r.success) { log('加载项目失败'); return; }
+    restoreProjectData(r.data);
+    // Also select in the project dropdown
+    $('project-select').value = projectId;
+    log('已恢复项目: ' + (r.data.title || projectId));
+  } catch (e) { log('加载项目失败: ' + e.message); }
+}
+
+$('dy-existing').addEventListener('change', function() {
+  const fid = this.value;
+  const btn = $('btn-dy-existing');
+  const projBox = $('dy-existing-projects');
+  if (fid) {
+    btn.disabled = false;
+    btn.style.background = 'var(--purple)';
+    btn.style.color = '#fff';
+    btn.style.border = 'none';
+    $('dy-existing-preview').innerHTML = videoPlayer(fid);
+    const video = _existingVideos.find(v => v.file_id === fid);
+    _renderVideoProjects(video);
+  } else {
+    btn.disabled = true;
+    btn.style.background = 'var(--bg3)';
+    btn.style.color = 'var(--text)';
+    btn.style.border = '1px solid var(--border)';
+    $('dy-existing-preview').innerHTML = '';
+    projBox.style.display = 'none';
+  }
+});
+
+async function douyinTranscribeExisting() {
+  const fileId = $('dy-existing').value;
+  if (!fileId) return;
+  loading('btn-dy-existing', true);
+  log('正在转写已下载视频...');
+  try {
+    await ensureProject();
+    const r = await api('POST', '/api/v1/douyin/transcribe-existing', { file_id: fileId });
+    if (!r.success) { showRes('dy-res', r.error?.message || '转写失败', true); log('转写失败'); loading('btn-dy-existing', false); return; }
+
+    const taskId = r.data.task_id;
+    const result = await pollTask(taskId, 'dy', '文案提取');
+
+    showRes('dy-res', result);
+    const stepData = { transcript: '', files: [] };
+    if (result.transcript) {
+      $('script-text').value = result.transcript;
+      state.scriptText = result.transcript;
+      stepData.transcript = result.transcript;
+    }
+    if (result.files?.length) {
+      stepData.files = result.files;
+      const vf = result.files.find(f => f.filename?.endsWith('.mp4'));
+      if (vf) {
+        stepData.video_file_id = vf.file_id;
+        state.douyinVideoFileId = vf.file_id;
+        $('dy-preview').innerHTML = videoPlayer(vf.file_id);
+      }
+    }
+    // Also store the selected file_id as source video
+    if (!state.douyinVideoFileId) state.douyinVideoFileId = fileId;
+    saveState();
+    saveStep('douyin', stepData);
+    markDone(1);
+    log('文案提取完成');
+  } catch (e) { showRes('dy-res', e.message, true); log('转写失败: ' + e.message); }
+  loading('btn-dy-existing', false);
+}
+
+// ── STEP 2: Rewrite ──
 async function rewriteScript() {
   const mode = document.querySelector('input[name="rewrite-mode"]:checked')?.value;
   const text = $('script-text').value.trim();
@@ -671,6 +962,8 @@ async function rewriteScript() {
 
   if (mode === 'none') {
     state.scriptText = text;
+    saveState();
+    saveStep('script', { text });
     markDone(2);
     showRes('rewrite-res', '文案已确认（未改写）');
     log('文案确认完成');
@@ -692,6 +985,8 @@ async function rewriteScript() {
       const newText = r.data.rewritten_text || '';
       $('script-text').value = newText;
       state.scriptText = newText;
+      saveState();
+      saveStep('script', { text: newText });
       showRes('rewrite-res', '改写完成');
       markDone(2);
       log('文案改写完成');
@@ -703,7 +998,7 @@ async function rewriteScript() {
   loading('btn-rewrite', false);
 }
 
-// ── STEP 3: Audio (async task) ──
+// ── STEP 3: Audio (TTS) ──
 async function generateAudio() {
   const text = $('script-text').value.trim();
   if (!text) { showRes('tts-res', '请先在步骤2填写文案', true); return; }
@@ -713,43 +1008,34 @@ async function generateAudio() {
   const promptText = $('v-prompt-text').value.trim();
 
   loading('btn-tts', true);
-  log('正在提交音频生成任务...');
+  log('正在生成音频...');
   try {
-    let taskId;
+    let r;
     if (promptFile && promptText) {
-      // Zero-shot
       const fd = new FormData();
       fd.append('text', text);
       fd.append('prompt_text', promptText);
       fd.append('speed', speed);
       fd.append('prompt_wav', promptFile);
-      taskId = await submitTask('POST', '/api/v1/voice/zero-shot', fd);
+      r = await api('POST', '/api/v1/voice/zero-shot', fd);
     } else {
-      // Normal TTS
       if (!speaker) { showRes('tts-res', '请选择音色', true); loading('btn-tts', false); return; }
-      taskId = await submitTask('POST', '/api/v1/voice/synthesize', { text, speaker, speed });
+      r = await api('POST', '/api/v1/voice/synthesize', { text, speaker, speed });
     }
-    log('任务已提交: ' + taskId);
+    if (!r.success) { showRes('tts-res', r.error?.message || '生成失败', true); log('音频生成失败'); loading('btn-tts', false); return; }
 
-    trackTask(taskId, 'tts-progress', {
-      btnId: 'btn-tts',
-      onCompleted: (result) => {
-        state.audioFileId = result.file_id;
-        showRes('tts-res', result);
-        $('tts-preview').innerHTML = audioPlayer(result.file_id);
-        markDone(3);
-        log('音频生成完成: ' + result.file_id);
-      },
-      onFailed: (err) => {
-        showRes('tts-res', err || '生成失败', true);
-        log('音频生成失败');
-      },
-    });
-  } catch (e) {
-    showRes('tts-res', e.message, true);
-    log('提交失败');
-    loading('btn-tts', false);
-  }
+    const taskId = r.data.task_id;
+    const result = await pollTask(taskId, 'tts', '音频生成');
+
+    state.audioFileId = result.file_id;
+    saveState();
+    saveStep('voice', { file_id: result.file_id });
+    showRes('tts-res', result);
+    $('tts-preview').innerHTML = audioPlayer(result.file_id);
+    markDone(3);
+    log('音频生成完成: ' + result.file_id);
+  } catch (e) { showRes('tts-res', e.message, true); log('音频生成失败: ' + e.message); }
+  loading('btn-tts', false);
 }
 
 // ── STEP 4: Video upload ──
@@ -765,6 +1051,7 @@ async function onVideoFileSelected(input) {
   nameEl.textContent = file.name;
   area.querySelector('.text').replaceWith(nameEl);
 
+  // Upload file
   log('正在上传视频素材...');
   const fd = new FormData();
   fd.append('file', file);
@@ -773,16 +1060,19 @@ async function onVideoFileSelected(input) {
     const r = await api('POST', '/api/v1/files/upload', fd);
     if (r.success) {
       state.uploadVideoFileId = r.data.file_id;
+      saveState();
       $('upload-video-info').style.display = 'block';
       $('upload-video-tag').textContent = 'file_id: ' + r.data.file_id;
       log('视频素材上传完成: ' + r.data.file_id);
+      // Save upload to project if exists
+      if (state.projectId) saveStep('digital_human', { upload_video_file_id: r.data.file_id });
     } else {
       log('视频上传失败');
     }
   } catch { log('视频上传失败'); }
 }
 
-// ── STEP 4: Generate digital human video (async task) ──
+// ── STEP 4: Generate digital human video ──
 async function generateVideo() {
   const audioId = $('dh-audio-override').value.trim() || state.audioFileId;
   if (!audioId) { showRes('dh-res', '请先在步骤3生成音频，或手动填入音频file_id', true); return; }
@@ -800,68 +1090,54 @@ async function generateVideo() {
   }
 
   loading('btn-dh', true);
-  log('正在提交数字人视频生成任务...');
+  log('正在生成数字人视频...');
   try {
-    const taskId = await submitTask('POST', '/api/v1/digital-human/generate', body);
-    log('任务已提交: ' + taskId);
+    const r = await api('POST', '/api/v1/digital-human/generate', body);
+    if (!r.success) { showRes('dh-res', r.error?.message || '生成失败', true); log('视频生成失败'); loading('btn-dh', false); return; }
 
-    trackTask(taskId, 'dh-progress', {
-      btnId: 'btn-dh',
-      onCompleted: (result) => {
-        state.videoFileId = result.file_id;
-        state.finalVideoFileId = result.file_id;
-        showRes('dh-res', result);
-        $('dh-preview').innerHTML = videoPlayer(result.file_id);
-        markDone(4);
-        log('视频生成完成: ' + result.file_id + ' (' + (result.elapsed_seconds || '?') + 's)');
-      },
-      onFailed: (err) => {
-        showRes('dh-res', err || '生成失败', true);
-        log('视频生成失败');
-      },
-    });
-  } catch (e) {
-    showRes('dh-res', e.message, true);
-    log('提交失败');
-    loading('btn-dh', false);
-  }
+    const taskId = r.data.task_id;
+    const result = await pollTask(taskId, 'dh', '数字人视频');
+
+    state.videoFileId = result.file_id;
+    state.finalVideoFileId = result.file_id;
+    saveState();
+    saveStep('digital_human', { file_id: result.file_id, upload_video_file_id: state.uploadVideoFileId || null });
+    showRes('dh-res', result);
+    $('dh-preview').innerHTML = videoPlayer(result.file_id);
+    markDone(4);
+    log('视频生成完成: ' + result.file_id + ' (' + (result.elapsed_seconds||'?') + 's)');
+  } catch (e) { showRes('dh-res', e.message, true); log('视频生成失败: ' + e.message); }
+  loading('btn-dh', false);
 }
 
-// ── STEP 5: Subtitle (async tasks) ──
+// ── STEP 5: Subtitle ──
 async function generateSubtitle() {
   const videoId = state.finalVideoFileId || state.videoFileId;
   if (!videoId) { showRes('sub-res', '请先在步骤4生成视频', true); return; }
 
   loading('btn-sub', true);
-  log('正在提交字幕生成任务...');
+  log('正在生成字幕...');
   try {
-    const taskId = await submitTask('POST', '/api/v1/subtitle/generate-srt', {
+    const r = await api('POST', '/api/v1/subtitle/generate-srt', {
       audio_file_id: state.audioFileId || videoId,
       language: 'zh',
       max_chars: 20,
     });
-    log('任务已提交: ' + taskId);
+    if (!r.success) { showRes('sub-res', r.error?.message || '生成失败', true); log('字幕生成失败'); loading('btn-sub', false); return; }
 
-    trackTask(taskId, 'sub-progress', {
-      btnId: 'btn-sub',
-      onCompleted: (result) => {
-        state.srtFileId = result.file_id;
-        showRes('sub-res', result);
-        $('sub-divider').style.display = 'block';
-        $('btn-burn').style.display = 'block';
-        markDone(5);
-        log('字幕生成完成: ' + result.entries_count + ' 条');
-      },
-      onFailed: (err) => {
-        showRes('sub-res', err || '生成失败', true);
-        log('字幕生成失败');
-      },
-    });
-  } catch (e) {
-    showRes('sub-res', e.message, true);
-    log('提交失败');
-    loading('btn-sub', false);
-  }
+    const taskId = r.data.task_id;
+    const result = await pollTask(taskId, 'sub', '字幕生成');
+
+    state.srtFileId = result.file_id;
+    saveState();
+    saveStep('subtitle', { srt_file_id: result.file_id, burned_file_id: null });
+    showRes('sub-res', result);
+    $('sub-divider').style.display = 'block';
+    $('btn-burn').style.display = 'block';
+    markDone(5);
+    log('字幕生成完成: ' + (result.entries_count || '?') + ' 条');
+  } catch (e) { showRes('sub-res', e.message, true); log('字幕生成失败: ' + e.message); }
+  loading('btn-sub', false);
 }
 
 async function burnSubtitle() {
@@ -869,9 +1145,9 @@ async function burnSubtitle() {
   if (!videoId || !state.srtFileId) { showRes('burn-res', '缺少视频或字幕文件', true); return; }
 
   loading('btn-burn', true);
-  log('正在提交字幕烧录任务...');
+  log('正在烧录字幕到视频...');
   try {
-    const taskId = await submitTask('POST', '/api/v1/subtitle/burn', {
+    const r = await api('POST', '/api/v1/subtitle/burn', {
       video_file_id: videoId,
       srt_file_id: state.srtFileId,
       font_name: $('sub-font').value || null,
@@ -881,30 +1157,23 @@ async function burnSubtitle() {
       outline: parseInt($('sub-outline').value) || 2,
       bottom_margin: parseInt($('sub-margin').value) || 30,
     });
-    log('任务已提交: ' + taskId);
+    if (!r.success) { showRes('burn-res', r.error?.message || '烧录失败', true); log('字幕烧录失败'); loading('btn-burn', false); return; }
 
-    trackTask(taskId, 'burn-progress', {
-      btnId: 'btn-burn',
-      onCompleted: (result) => {
-        state.burnedVideoFileId = result.file_id;
-        state.finalVideoFileId = result.file_id;
-        showRes('burn-res', result);
-        $('burn-preview').innerHTML = videoPlayer(result.file_id);
-        log('字幕烧录完成: ' + result.file_id);
-      },
-      onFailed: (err) => {
-        showRes('burn-res', err || '烧录失败', true);
-        log('字幕烧录失败');
-      },
-    });
-  } catch (e) {
-    showRes('burn-res', e.message, true);
-    log('提交失败');
-    loading('btn-burn', false);
-  }
+    const taskId = r.data.task_id;
+    const result = await pollTask(taskId, 'burn', '字幕烧录');
+
+    state.burnedVideoFileId = result.file_id;
+    state.finalVideoFileId = result.file_id;
+    saveState();
+    saveStep('subtitle', { srt_file_id: state.srtFileId, burned_file_id: result.file_id });
+    showRes('burn-res', result);
+    $('burn-preview').innerHTML = videoPlayer(result.file_id);
+    log('字幕烧录完成: ' + result.file_id);
+  } catch (e) { showRes('burn-res', e.message, true); log('字幕烧录失败: ' + e.message); }
+  loading('btn-burn', false);
 }
 
-// ── STEP 6: BGM (async task) ──
+// ── STEP 6: BGM ──
 async function addBgm() {
   if ($('bgm-none-check').checked) {
     showRes('bgm-res', '已跳过背景音乐');
@@ -924,45 +1193,32 @@ async function addBgm() {
     fade_out_seconds: parseFloat($('bgm-fade').value) || 2.0,
   };
 
-  if ($('bgm-random-check').checked) {
-    body.random_choice = true;
+  const trackName = $('bgm-track').value;
+  if (trackName && !$('bgm-custom-check').checked) {
+    body.bgm_name = trackName;
   } else {
-    const trackName = $('bgm-track').value;
-    if (trackName) body.bgm_name = trackName;
-    else body.random_choice = true;
+    body.random_choice = true;
   }
 
   loading('btn-bgm', true);
-  log('正在提交背景音乐混合任务...');
+  log('正在混合背景音乐...');
   try {
-    const taskId = await submitTask('POST', '/api/v1/bgm/mix', body);
-    log('任务已提交: ' + taskId);
+    const r = await api('POST', '/api/v1/bgm/mix', body);
+    if (!r.success) { showRes('bgm-res', r.error?.message || '混合失败', true); log('BGM 混合失败'); loading('btn-bgm', false); return; }
 
-    trackTask(taskId, 'bgm-progress', {
-      btnId: 'btn-bgm',
-      onCompleted: (result) => {
-        state.finalVideoFileId = result.file_id;
-        showRes('bgm-res', result);
-        $('bgm-preview').innerHTML = videoPlayer(result.file_id);
-        markDone(6);
-        log('BGM 混合完成: ' + result.track_name);
-      },
-      onFailed: (err) => {
-        showRes('bgm-res', err || '混合失败', true);
-        log('BGM 混合失败');
-      },
-    });
-  } catch (e) {
-    showRes('bgm-res', e.message, true);
-    log('提交失败');
-    loading('btn-bgm', false);
-  }
+    const taskId = r.data.task_id;
+    const result = await pollTask(taskId, 'bgm', 'BGM混合');
+
+    state.finalVideoFileId = result.file_id;
+    saveState();
+    saveStep('bgm', { file_id: result.file_id });
+    showRes('bgm-res', result);
+    $('bgm-preview').innerHTML = videoPlayer(result.file_id);
+    markDone(6);
+    log('BGM 混合完成: ' + (result.track_name || ''));
+  } catch (e) { showRes('bgm-res', e.message, true); log('BGM 混合失败: ' + e.message); }
+  loading('btn-bgm', false);
 }
-
-// ── Cleanup on page unload ──
-window.addEventListener('beforeunload', () => {
-  Object.values(activeStreams).forEach(es => es.close());
-});
 </script>
 </body>
 </html>
