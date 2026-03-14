@@ -378,6 +378,12 @@ class LstmSync:
         self.ffmpeg_bin = ffmpeg_bin
         self._progress_callback = progress_callback
 
+        # Optimization: Cache ONNX session with optimized options
+        self._onnx_session: ort.InferenceSession | None = None
+        # Optimization: Cache HuBERT model and feature extractor
+        self._hubert_model: HubertModel | None = None
+        self._feature_extractor: Wav2Vec2FeatureExtractor | None = None
+
         repair_npy_path = self.checkpoints_dir / "repair.npy"
         auxiliary_path = self.checkpoints_dir / "auxiliary"
         if not repair_npy_path.exists():
@@ -398,6 +404,28 @@ class LstmSync:
     def _report(self, step: str, progress: int, message: str) -> None:
         if self._progress_callback:
             self._progress_callback(step, progress, message)
+
+    def _get_onnx_session(self) -> ort.InferenceSession:
+        if self._onnx_session is None:
+            sess_options = ort.SessionOptions()
+            sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+            sess_options.intra_op_num_threads = 4
+            sess_options.enable_mem_pattern = True
+            sess_options.enable_mem_reuse = True
+            self._onnx_session = ort.InferenceSession(
+                str(self.human_path), sess_options, providers=list(self.runtime.onnx_providers)
+            )
+            logger.info("ONNX session created with graph optimization and memory reuse")
+        return self._onnx_session
+
+    def _get_hubert(self) -> tuple[Wav2Vec2FeatureExtractor, HubertModel]:
+        if self._hubert_model is None or self._feature_extractor is None:
+            self._feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(str(self.hubert_path))
+            self._hubert_model = HubertModel.from_pretrained(str(self.hubert_path)).to(self.device).eval()
+            if self.runtime.resolved == "cuda":
+                self._hubert_model = self._hubert_model.half()
+            logger.info("HuBERT model loaded and cached")
+        return self._feature_extractor, self._hubert_model
 
     def _face_detect(self, images: list[np.ndarray]):
         faces = []
@@ -474,12 +502,11 @@ class LstmSync:
         self._report("preprocessing", 5, "视频预处理中...")
         source_video_path = Path(video_path).expanduser().resolve()
         fps25_path = Path(video_fps25_path).expanduser().resolve()
-        temp_video_path = Path(f"{video_temp_path}.mp4").expanduser().resolve()
         source_audio_path = Path(audio_path).expanduser().resolve()
         temp_audio_path = Path(audio_temp_path).expanduser().resolve()
         final_video_path = Path(video_out_path).expanduser().resolve()
 
-        session = ort.InferenceSession(str(self.human_path), providers=list(self.runtime.onnx_providers))
+        session = self._get_onnx_session()
         input_names = [input_info.name for input_info in session.get_inputs()]
         model_input_type = session.get_inputs()[0].type
         self.model_dtype = np.float16 if "float16" in model_input_type else np.float32
@@ -544,10 +571,7 @@ class LstmSync:
         )
 
         self._report("audio_features", 20, "提取音频特征...")
-        feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(str(self.hubert_path))
-        hubert_model = HubertModel.from_pretrained(str(self.hubert_path)).to(self.device).eval()
-        if self.runtime.resolved == "cuda":
-            hubert_model = hubert_model.half()
+        feature_extractor, hubert_model = self._get_hubert()
         wav, sample_rate = sf.read(str(temp_audio_path))
         input_values = feature_extractor(wav, sampling_rate=sample_rate, return_tensors="pt").input_values
         input_values = input_values.to(self.device)
@@ -557,10 +581,6 @@ class LstmSync:
         with torch.no_grad():
             outputs = hubert_model(input_values)
             reps = outputs.last_hidden_state.permute(0, 2, 1).cpu().numpy()
-
-        del hubert_model, feature_extractor
-        if self.runtime.resolved == "cuda":
-            torch.cuda.empty_cache()
 
         rep_step_size = 10
         rep_chunks = []
@@ -577,7 +597,13 @@ class LstmSync:
         self._report("face_detection", 35, "人脸检测...")
         frame_height, frame_width = full_frames[0].shape[:-1]
         total_batches = int(np.ceil(float(len(full_frames)) / self.wav2lip_batch_size))
-        writer = cv2.VideoWriter(str(temp_video_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (frame_width, frame_height))
+        use_cpu_resize = self.runtime.resolved != "cuda"
+
+        # Optimization: Use FFmpeg pipe instead of cv2.VideoWriter to encode directly to H.264
+        use_nvenc = self.runtime.resolved == "cuda" and self._check_nvenc_available()
+        ffmpeg_cmd = self._build_ffmpeg_pipe_cmd(frame_width, frame_height, int(fps), temp_audio_path, final_video_path, use_nvenc=use_nvenc)
+        logger.info("Starting FFmpeg pipe: %s", " ".join(ffmpeg_cmd))
+        pipe = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
         try:
             for batch_index, (img_batch, mel_batch, frames, coords, affines) in enumerate(
@@ -615,58 +641,74 @@ class LstmSync:
                 for pred, frame, coords_item, affine in zip(prediction, frames, coords, affines):
                     x1, y1, x2, y2 = coords_item
                     pred = pred[[2, 1, 0], :, :]
-                    resized = resize_tensor_image(
-                        torch.from_numpy(pred).to(self.device),
-                        size=(int(y2 - y1), int(x2 - x1)),
-                    )
-                    merged = self.detect_face.restorer.restore_img(frame, resized, affine, scale_h=self.scale_h, scale_w=self.scale_w)
-                    writer.write(merged)
+                    target_h, target_w = int(y2 - y1), int(x2 - x1)
 
-                if (batch_index + 1) % 3 == 0:
+                    if use_cpu_resize:
+                        # Optimization: Use cv2.resize on CPU to avoid unnecessary tensor/GPU transfers
+                        pred_hwc = np.transpose(pred, (1, 2, 0))
+                        resized_np = cv2.resize(pred_hwc, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
+                        resized = rearrange(torch.from_numpy(resized_np), "h w c -> c h w")
+                    else:
+                        resized = resize_tensor_image(
+                            torch.from_numpy(pred).to(self.device),
+                            size=(target_h, target_w),
+                        )
+                    merged = self.detect_face.restorer.restore_img(frame, resized, affine, scale_h=self.scale_h, scale_w=self.scale_w)
+                    pipe.stdin.write(merged.tobytes())
+
+                if (batch_index + 1) % 50 == 0:
                     gc.collect()
                     if self.runtime.resolved == "cuda":
                         torch.cuda.empty_cache()
         finally:
-            writer.release()
-
-        self._report("compositing", 92, "合成视频...")
-        try:
-            if not self._try_nvenc_final_merge(temp_video_path, temp_audio_path, final_video_path):
-                run_command(
-                    [
-                        self.ffmpeg_bin,
-                        "-y",
-                        "-i",
-                        str(temp_video_path),
-                        "-i",
-                        str(temp_audio_path),
-                        "-c:v",
-                        "libx264",
-                        "-crf",
-                        "16",
-                        "-preset",
-                        "superfast",
-                        "-pix_fmt",
-                        "yuv420p",
-                        "-c:a",
-                        "aac",
-                        "-b:a",
-                        "192k",
-                        "-ar",
-                        "44100",
-                        "-ac",
-                        "2",
-                        "-shortest",
-                        str(final_video_path),
-                    ]
-                )
-        finally:
+            if pipe.stdin:
+                pipe.stdin.close()
+            self._report("compositing", 92, "等待编码完成...")
+            pipe.wait()
+            stderr_output = pipe.stderr.read().decode() if pipe.stderr else ""
+            if pipe.returncode != 0:
+                logger.error("FFmpeg pipe failed (rc=%d): %s", pipe.returncode, stderr_output)
+                raise RuntimeError(f"FFmpeg encoding failed: {stderr_output[-500:]}")
             gc.collect()
             if self.runtime.resolved == "cuda":
                 torch.cuda.empty_cache()
 
         self._report("completed", 100, "完成")
         return final_video_path
+
+    def _build_ffmpeg_pipe_cmd(
+        self, width: int, height: int, fps: int, audio_path: Path, output_path: Path,
+        use_nvenc: bool = False,
+    ) -> list[str]:
+        """Build FFmpeg command for piped raw video input with audio muxing."""
+        cmd = [
+            self.ffmpeg_bin, "-y",
+            "-f", "rawvideo", "-pix_fmt", "bgr24",
+            "-s", f"{width}x{height}", "-r", str(fps),
+            "-i", "-",
+            "-i", str(audio_path),
+        ]
+        if use_nvenc:
+            cmd.extend(["-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr", "-cq", "18"])
+        else:
+            cmd.extend(["-c:v", "libx264", "-crf", "16", "-preset", "superfast"])
+        cmd.extend([
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-ac", "2",
+            "-shortest", str(output_path),
+        ])
+        return cmd
+
+    def _check_nvenc_available(self) -> bool:
+        """Check if h264_nvenc encoder is available."""
+        try:
+            result = subprocess.run(
+                [self.ffmpeg_bin, "-hide_banner", "-encoders"],
+                capture_output=True, text=True, timeout=5,
+            )
+            return "h264_nvenc" in result.stdout
+        except Exception:
+            return False
 
     def _try_nvenc_fps_normalize(self, source_path: Path, dest_path: Path) -> bool:
         try:
@@ -698,39 +740,3 @@ class LstmSync:
             logger.info("NVENC not available for FPS normalization, falling back to libx264")
             return False
 
-    def _try_nvenc_final_merge(self, video_path: Path, audio_path: Path, output_path: Path) -> bool:
-        try:
-            run_command(
-                [
-                    self.ffmpeg_bin,
-                    "-y",
-                    "-i",
-                    str(video_path),
-                    "-i",
-                    str(audio_path),
-                    "-c:v",
-                    "h264_nvenc",
-                    "-preset",
-                    "p4",
-                    "-rc",
-                    "vbr",
-                    "-cq",
-                    "18",
-                    "-pix_fmt",
-                    "yuv420p",
-                    "-c:a",
-                    "aac",
-                    "-b:a",
-                    "192k",
-                    "-ar",
-                    "44100",
-                    "-ac",
-                    "2",
-                    "-shortest",
-                    str(output_path),
-                ]
-            )
-            return True
-        except Exception:
-            logger.info("NVENC not available for final merge, falling back to libx264")
-            return False
