@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(su - claude -c \"which claude && claude --version\")",
-      "Bash(su - claude -c \"claude --help 2>&1 | grep -i skip\")"
-    ]
-  }
-}
