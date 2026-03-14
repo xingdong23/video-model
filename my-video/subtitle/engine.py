@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import subprocess
 import tempfile
@@ -281,8 +282,17 @@ class SubtitleEngine:
 
         fonts_dir = None
         resolved_font_name = font_name
-        if font_path:
-            font_file = Path(font_path).expanduser().resolve()
+
+        # Auto-detect font: use provided path, or fall back to bundled CJK font
+        effective_font_path = font_path
+        if not effective_font_path:
+            bundled_font = self.paths.root / "fonts" / "NotoSansSC-Regular-Static.ttf"
+            if bundled_font.exists():
+                effective_font_path = str(bundled_font)
+                logger.info("Using bundled CJK font: %s", bundled_font)
+
+        if effective_font_path:
+            font_file = Path(effective_font_path).expanduser().resolve()
             if not font_file.exists():
                 raise FileNotFoundError("Font file not found: %s" % font_file)
             fonts_dir = font_file.parent
@@ -333,6 +343,18 @@ class SubtitleEngine:
             bottom_margin=bottom_margin,
         )
 
+    @staticmethod
+    def _fontconfig_env() -> dict:
+        """Build env with FONTCONFIG_PATH so libass can find fonts."""
+        env = os.environ.copy()
+        # Ensure fontconfig can locate its config (needed in conda / container envs)
+        if "FONTCONFIG_PATH" not in env:
+            import sys
+            conda_fc = Path(sys.executable).resolve().parent.parent / "etc" / "fonts"
+            if conda_fc.is_dir():
+                env["FONTCONFIG_PATH"] = str(conda_fc)
+        return env
+
     def _burn_subtitles_with_ffmpeg(
         self,
         ffmpeg_bin: str,
@@ -341,6 +363,7 @@ class SubtitleEngine:
         input_subtitle: Path,
         subtitle_filter: str,
     ) -> SubtitleBurnResult:
+        env = self._fontconfig_env()
         # Try NVENC first, fall back to libx264
         nvenc_command = [
             ffmpeg_bin,
@@ -365,6 +388,7 @@ class SubtitleEngine:
             text=True,
             encoding="utf-8",
             errors="replace",
+            env=env,
         )
         if result.returncode != 0:
             logger.info("NVENC not available for subtitle burning, falling back to libx264")
@@ -391,6 +415,7 @@ class SubtitleEngine:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
+                env=env,
             )
             if result.returncode != 0:
                 raise RuntimeError("ffmpeg failed while burning subtitles:\n%s" % result.stderr.strip())
@@ -909,6 +934,11 @@ class SubtitleEngine:
         if font_name:
             candidates.append(Path(font_name).expanduser())
 
+        # Bundled CJK font (highest priority fallback)
+        bundled_font = Path(__file__).resolve().parent / "fonts" / "NotoSansSC-Regular-Static.ttf"
+        if bundled_font.exists():
+            candidates.append(bundled_font)
+
         candidates.extend(
             [
                 Path("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"),
@@ -932,16 +962,16 @@ class SubtitleEngine:
         font = TTFont(str(font_path), fontNumber=int(font_index))
         try:
             name_table = font["name"]
-            preferred_name = None
+            family_name = None  # nameID=1: Font Family
+            full_name = None    # nameID=4: Full Name
             for record in name_table.names:
                 if record.platformID != 3:
                     continue
-                if record.nameID == 6:
-                    return record.string.decode("utf-16-be")
-                if record.nameID == 4 and preferred_name is None:
-                    preferred_name = record.string.decode("utf-16-be")
-            if preferred_name:
-                return preferred_name
+                if record.nameID == 1 and family_name is None:
+                    family_name = record.string.decode("utf-16-be")
+                if record.nameID == 4 and full_name is None:
+                    full_name = record.string.decode("utf-16-be")
+            # Prefer family name (nameID=1) for libass/fontconfig compatibility
+            return family_name or full_name or font_path.stem
         finally:
             font.close()
-        return font_path.stem
