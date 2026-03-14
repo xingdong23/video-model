@@ -27,7 +27,7 @@ class EngineManager:
     def init_voice(self):
         from .config import get_settings
         settings = get_settings()
-        from voice.engine import VoiceEngine
+        from tts.engine import VoiceEngine
         logger.info("Loading VoiceEngine (model_dir=%s, fp16=%s) ...", settings.voice_model_dir, settings.voice_fp16)
         self._voice_engine = VoiceEngine(model_dir=settings.voice_model_dir, fp16=settings.voice_fp16)
         logger.info("VoiceEngine ready (%d speakers)", len(self._voice_engine.list_speakers()))
@@ -41,7 +41,7 @@ class EngineManager:
     def init_digital_human(self):
         from .config import get_settings
         settings = get_settings()
-        from digital_human.engine import DigitalHumanEngine
+        from avatar.engine import DigitalHumanEngine
         logger.info("Loading DigitalHumanEngine ...")
         self._digital_human_engine = DigitalHumanEngine(
             tuilionnx_dir=settings.digital_human_tuilionnx_dir,
@@ -78,7 +78,7 @@ class EngineManager:
     def init_bgm(self):
         from .config import get_settings
         settings = get_settings()
-        from bgm.engine import BgmEngine
+        from audio_mixer.engine import BgmEngine
         logger.info("Loading BgmEngine ...")
         self._bgm_engine = BgmEngine(
             library_dir=settings.bgm_library_dir,
@@ -95,7 +95,7 @@ class EngineManager:
     def init_rewrite(self):
         from .config import get_settings
         settings = get_settings()
-        from rewrite.engine import RewriteEngine
+        from copywriter.engine import RewriteEngine
         logger.info("Loading RewriteEngine ...")
         self._rewrite_engine = RewriteEngine(
             api_key=settings.rewrite_api_key,
@@ -115,7 +115,7 @@ class EngineManager:
         if self._workflow_engine is None:
             from .config import get_settings
             settings = get_settings()
-            from workflow.engine import WorkflowEngine
+            from pipeline.engine import WorkflowEngine
             self._workflow_engine = WorkflowEngine(
                 voice_model_dir=settings.voice_model_dir,
                 tuilionnx_dir=settings.digital_human_tuilionnx_dir,

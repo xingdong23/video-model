@@ -39,7 +39,7 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
 
     # ── sys.path setup (once) ──
-    root = str(settings.my_video_root)
+    root = str(settings.digihuman_root)
     if root not in sys.path:
         sys.path.insert(0, root)
 
@@ -84,7 +84,7 @@ def create_app():
     settings = get_settings()
 
     app = FastAPI(
-        title="my-video API",
+        title="DigiHuman API",
         version="1.0.0",
         lifespan=lifespan,
     )
@@ -153,14 +153,14 @@ def create_app():
         return info
 
     # ── Routers ──
-    from .routers import voice, digital_human, subtitle, bgm, rewrite, douyin, workflow, files, tasks, projects
-    app.include_router(voice.router, prefix="/api/v1/voice", tags=["voice"])
-    app.include_router(digital_human.router, prefix="/api/v1/digital-human", tags=["digital-human"])
+    from .routers import tts, avatar, subtitle, audio_mixer, copywriter, scraper, pipeline, files, tasks, projects
+    app.include_router(tts.router, prefix="/api/v1/tts", tags=["tts"])
+    app.include_router(avatar.router, prefix="/api/v1/avatar", tags=["avatar"])
     app.include_router(subtitle.router, prefix="/api/v1/subtitle", tags=["subtitle"])
-    app.include_router(bgm.router, prefix="/api/v1/bgm", tags=["bgm"])
-    app.include_router(rewrite.router, prefix="/api/v1/rewrite", tags=["rewrite"])
-    app.include_router(douyin.router, prefix="/api/v1/douyin", tags=["douyin"])
-    app.include_router(workflow.router, prefix="/api/v1/workflow", tags=["workflow"])
+    app.include_router(audio_mixer.router, prefix="/api/v1/audio-mixer", tags=["audio-mixer"])
+    app.include_router(copywriter.router, prefix="/api/v1/copywriter", tags=["copywriter"])
+    app.include_router(scraper.router, prefix="/api/v1/scraper", tags=["scraper"])
+    app.include_router(pipeline.router, prefix="/api/v1/pipeline", tags=["pipeline"])
     app.include_router(files.router, prefix="/api/v1/files", tags=["files"])
     app.include_router(tasks.router, prefix="/api/v1/tasks", tags=["tasks"])
     app.include_router(projects.router, prefix="/api/v1/projects", tags=["projects"])

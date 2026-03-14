@@ -6,16 +6,16 @@ from typing import Optional
 from pydantic_settings import BaseSettings
 
 
-_MY_VIDEO_ROOT = Path(__file__).resolve().parent.parent
+_DIGIHUMAN_ROOT = Path(__file__).resolve().parent.parent
 
 
 class Settings(BaseSettings):
-    model_config = {"env_prefix": "MYVIDEO_"}
+    model_config = {"env_prefix": "DIGIHUMAN_"}
 
     host: str = "0.0.0.0"
     port: int = 8000
 
-    # Auth — set MYVIDEO_API_KEY to enable; empty = no auth
+    # Auth — set DIGIHUMAN_API_KEY to enable; empty = no auth
     api_key: str = ""
 
     # Uvicorn
@@ -24,7 +24,7 @@ class Settings(BaseSettings):
 
     # Storage
     storage_backend: str = "local"
-    storage_root: str = str(_MY_VIDEO_ROOT / "api_storage")
+    storage_root: str = str(_DIGIHUMAN_ROOT / "storage")
     file_ttl_seconds: int = 3600 * 24  # 24 hours
 
     # CORS
@@ -55,8 +55,8 @@ class Settings(BaseSettings):
     rewrite_model: Optional[str] = None
 
     @property
-    def my_video_root(self) -> Path:
-        return _MY_VIDEO_ROOT
+    def digihuman_root(self) -> Path:
+        return _DIGIHUMAN_ROOT
 
 
 _settings: Optional[Settings] = None

@@ -218,7 +218,7 @@ def step_douyin_download(douyin_url: str, output_dir: Path) -> StepResult:
     step.status = "running"
 
     try:
-        from douyin.douyin_transcript import (
+        from scraper.engine import (
             extract_douyin_share_link,
             resolve_douyin_page_url,
             download_video_ytdlp,
@@ -266,7 +266,7 @@ def step_douyin_transcribe(video_path: str, output_dir: Path) -> StepResult:
     step.status = "running"
 
     try:
-        from douyin.douyin_transcript import transcribe_video
+        from scraper.engine import transcribe_video
         transcript = transcribe_video(video_path, save_text_file=True)
         step.details = {
             "transcript_length": len(transcript),
@@ -299,7 +299,7 @@ def step_voice_tts(text: str, speaker: str, output_dir: Path, speed: float = 1.0
     step.status = "running"
 
     try:
-        from voice.engine import VoiceEngine
+        from tts.engine import VoiceEngine
         engine = VoiceEngine()
 
         available_speakers = engine.list_speakers()
@@ -355,7 +355,7 @@ def step_digital_human(audio_path: str, face_video: str, output_dir: Path) -> St
     step.status = "running"
 
     try:
-        from digital_human.engine import DigitalHumanEngine
+        from avatar.engine import DigitalHumanEngine
         engine = DigitalHumanEngine()
 
         video_output = output_dir / "digital_human_raw.mp4"
@@ -458,7 +458,7 @@ def step_bgm(video_path: str, output_dir: Path, bgm_name: Optional[str] = None) 
     step.status = "running"
 
     try:
-        from bgm.engine import BgmEngine
+        from audio_mixer.engine import BgmEngine
         engine = BgmEngine()
 
         tracks = engine.list_library_tracks()
@@ -522,7 +522,7 @@ def step_workflow_e2e(
     step.status = "running"
 
     try:
-        from workflow.engine import WorkflowEngine
+        from pipeline.engine import WorkflowEngine
         engine = WorkflowEngine()
 
         result = engine.run(
@@ -800,7 +800,7 @@ def run_pipeline(
         resolved_face = find_face_video(Path(material_dir))
     if not resolved_face:
         # Fallback to built-in face
-        builtin_face = PROJECT_ROOT / "digital_human" / "faces" / "测试视频.mp4"
+        builtin_face = PROJECT_ROOT / "avatar" / "faces" / "test-video.mp4"
         if builtin_face.exists():
             resolved_face = str(builtin_face)
 

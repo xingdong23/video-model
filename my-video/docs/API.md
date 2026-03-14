@@ -1,4 +1,4 @@
-# my-video HTTP API 文档
+# DigiHuman HTTP API 文档
 
 Base URL: `http://<host>:<port>`
 
@@ -48,12 +48,12 @@ Base URL: `http://<host>:<port>`
 
 #### 方式一：Webhook 回调（推荐，server-to-server）
 
-提交任务时带 `callback_url`，任务完成/失败后 my-video 会 POST 到该 URL：
+提交任务时带 `callback_url`，任务完成/失败后 DigiHuman 会 POST 到该 URL：
 
 ```
-Web项目                            my-video (GPU)
+Web项目                            DigiHuman (GPU)
   │                                    │
-  │  POST /digital-human/generate      │
+  │  POST /avatar/generate              │
   │  { ..., callback_url: "http://     │
   │    localhost:3000/webhook/task" }   │
   │───────────────────────────────────→ │
@@ -112,7 +112,7 @@ GET /api/v1/tasks/{task_id}
   "success": true,
   "data": {
     "task_id": "a1b2c3d4e5f67890",
-    "task_type": "digital_human",
+    "task_type": "avatar",
     "status": "processing",
     "step": "inference",
     "progress": 55,
@@ -190,7 +190,7 @@ es.addEventListener("failed", (e) => {
 
 ### Webhook 回调
 
-所有异步接口的请求体均支持可选字段 `callback_url`。任务到达终态后，my-video 会向该 URL 发送 POST 请求：
+所有异步接口的请求体均支持可选字段 `callback_url`。任务到达终态后，DigiHuman 会向该 URL 发送 POST 请求：
 
 **回调请求**：
 
@@ -200,7 +200,7 @@ Content-Type: application/json
 
 {
   "task_id": "a1b2c3d4e5f67890",
-  "task_type": "digital_human",
+  "task_type": "avatar",
   "status": "completed",
   "step": "completed",
   "progress": 100,
@@ -228,7 +228,7 @@ Content-Type: application/json
 
 ```python
 # Web 项目（如 Flask / Django / FastAPI）
-@app.post("/webhook/my-video")
+@app.post("/webhook/digihuman")
 async def handle_callback(payload: dict):
     task_id = payload["task_id"]
     status = payload["status"]
@@ -247,9 +247,9 @@ async def handle_callback(payload: dict):
 
 ---
 
-## 数字人
+## Avatar (数字人)
 
-### GET /api/v1/digital-human/faces
+### GET /api/v1/avatar/faces
 
 列出可用的人脸预设视频。**同步**。
 
@@ -262,7 +262,7 @@ async def handle_callback(payload: dict):
 }
 ```
 
-### POST /api/v1/digital-human/generate
+### POST /api/v1/avatar/generate
 
 生成数字人视频。**异步 (GPU)**，返回 `202`。
 
@@ -316,9 +316,9 @@ async def handle_callback(payload: dict):
 
 ---
 
-## 语音
+## TTS (语音)
 
-### GET /api/v1/voice/speakers
+### GET /api/v1/tts/speakers
 
 列出可用的说话人。**同步**。
 
@@ -334,7 +334,7 @@ async def handle_callback(payload: dict):
 }
 ```
 
-### POST /api/v1/voice/synthesize
+### POST /api/v1/tts/synthesize
 
 文本转语音。**异步 (GPU)**，返回 `202`。
 
@@ -356,13 +356,13 @@ async def handle_callback(payload: dict):
 }
 ```
 
-### POST /api/v1/voice/synthesize/stream
+### POST /api/v1/tts/synthesize/stream
 
 流式语音合成，直接返回 WAV 音频流。**同步**。
 
 请求体同 `/synthesize`。响应 `Content-Type: audio/wav`。
 
-### POST /api/v1/voice/zero-shot
+### POST /api/v1/tts/zero-shot
 
 零样本语音克隆。**异步 (GPU)**，返回 `202`。
 
@@ -385,7 +385,7 @@ async def handle_callback(payload: dict):
 }
 ```
 
-### POST /api/v1/voice/voices/export
+### POST /api/v1/tts/voices/export
 
 导出自定义音色。**同步**。
 
@@ -482,9 +482,9 @@ LLM 纠错已有字幕。**同步**（调用外部 LLM API）。
 
 ---
 
-## 背景音乐
+## Audio Mixer (背景音乐)
 
-### GET /api/v1/bgm/tracks
+### GET /api/v1/audio-mixer/tracks
 
 列出 BGM 素材库。**同步**。
 
@@ -499,7 +499,7 @@ LLM 纠错已有字幕。**同步**（调用外部 LLM API）。
 }
 ```
 
-### POST /api/v1/bgm/mix
+### POST /api/v1/audio-mixer/mix
 
 混合背景音乐到视频。**异步 (CPU)**，返回 `202`。
 
@@ -530,9 +530,9 @@ LLM 纠错已有字幕。**同步**（调用外部 LLM API）。
 
 ---
 
-## 文案改写
+## Copywriter (文案改写)
 
-### POST /api/v1/rewrite/auto
+### POST /api/v1/copywriter/auto
 
 自动改写文案。**同步**。
 
@@ -542,7 +542,7 @@ LLM 纠错已有字幕。**同步**（调用外部 LLM API）。
 
 **响应**：`{ "rewritten_text": "..." }`
 
-### POST /api/v1/rewrite/instruction
+### POST /api/v1/copywriter/instruction
 
 按指令改写。**同步**。
 
@@ -553,9 +553,9 @@ LLM 纠错已有字幕。**同步**（调用外部 LLM API）。
 
 ---
 
-## 抖音
+## Scraper (视频采集)
 
-### POST /api/v1/douyin/transcribe
+### POST /api/v1/scraper/transcribe
 
 下载抖音视频并转录文案。**异步 (CPU)**，返回 `202`。
 
@@ -575,7 +575,7 @@ LLM 纠错已有字幕。**同步**（调用外部 LLM API）。
 }
 ```
 
-### POST /api/v1/douyin/download
+### POST /api/v1/scraper/download
 
 仅下载抖音视频（不转录）。**异步 (CPU)**，返回 `202`。
 
@@ -595,9 +595,9 @@ LLM 纠错已有字幕。**同步**（调用外部 LLM API）。
 
 ---
 
-## 工作流（一键生成）
+## Pipeline (一键生成)
 
-### POST /api/v1/workflow/run
+### POST /api/v1/pipeline/run
 
 串联多个步骤的一键工作流。**同步**（内部阻塞直到全部完成）。
 
@@ -613,7 +613,7 @@ LLM 纠错已有字幕。**同步**（调用外部 LLM API）。
     "prompt_audio_file_id": null,
     "speed": 1.0
   },
-  "digital_human": {
+  "avatar": {
     "face": "anchor1.mp4",
     "video_file_id": null,
     "batch_size": 4,
@@ -664,7 +664,7 @@ LLM 纠错已有字幕。**同步**（调用外部 LLM API）。
 **字段说明**：
 
 - `audio` (必填) — 音频来源，提供 `file_id` 直接使用现有音频，或提供 `text` + `speaker` 走 TTS
-- `digital_human` (可选) — 数字人参数，全部有默认值
+- `avatar` (可选) — 数字人参数，全部有默认值
 - `subtitle` (可选) — 传 `null` 则不生成字幕，传对象则生成
 - `subtitle_style` (可选) — 字幕样式，仅在 `subtitle` 非空时生效
 - `bgm` (可选) — 传 `null` 则不加 BGM
@@ -732,7 +732,7 @@ LLM 纠错已有字幕。**同步**（调用外部 LLM API）。
   "data": {
     "file_id": "xxx",
     "original_name": "audio.wav",
-    "category": "voice",
+    "category": "tts",
     "size_bytes": 1234567,
     "created_at": 1710352800.0,
     "download_url": "/api/v1/files/xxx"
@@ -772,9 +772,9 @@ LLM 纠错已有字幕。**同步**（调用外部 LLM API）。
 
 | 队列 | 并发 | 包含接口 |
 |------|------|----------|
-| GPU | 串行 (1 worker) | digital-human/generate, voice/synthesize, voice/zero-shot, subtitle/generate-srt |
-| CPU | 2 并发 workers | subtitle/burn, bgm/mix, douyin/transcribe, douyin/download |
-| 同步 (无队列) | 不限 | voice/speakers, voice/synthesize/stream, voice/voices/export, digital-human/faces, subtitle/correct, bgm/tracks, rewrite/*, files/*, workflow/run |
+| GPU | 串行 (1 worker) | avatar/generate, tts/synthesize, tts/zero-shot, subtitle/generate-srt |
+| CPU | 2 并发 workers | subtitle/burn, audio-mixer/mix, scraper/transcribe, scraper/download |
+| 同步 (无队列) | 不限 | tts/speakers, tts/synthesize/stream, tts/voices/export, avatar/faces, subtitle/correct, audio-mixer/tracks, copywriter/*, files/*, pipeline/run |
 
 ---
 
@@ -796,10 +796,10 @@ with open("audio.wav", "rb") as f:
 audio_file_id = r.json()["data"]["file_id"]
 
 # 2. 提交数字人生成，带 callback_url
-r = httpx.post(f"{GPU_API}/api/v1/digital-human/generate", json={
+r = httpx.post(f"{GPU_API}/api/v1/avatar/generate", json={
     "audio_file_id": audio_file_id,
     "face": "anchor1.mp4",
-    "callback_url": "http://localhost:3000/webhook/my-video",
+    "callback_url": "http://localhost:3000/webhook/digihuman",
 }, headers=HEADERS)
 task_id = r.json()["data"]["task_id"]
 # 记录 task_id 到数据库，关联业务订单
@@ -808,7 +808,7 @@ task_id = r.json()["data"]["task_id"]
 **接收端**（Web 项目回调接口）：
 
 ```python
-@app.post("/webhook/my-video")
+@app.post("/webhook/digihuman")
 async def handle_callback(payload: dict):
     task_id = payload["task_id"]
     status = payload["status"]

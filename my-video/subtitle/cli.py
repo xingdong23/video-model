@@ -27,7 +27,7 @@ def _load_subtitle_engine():
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Standalone subtitle generator and burn-in tool for my-video"
+        description="Standalone subtitle generator and burn-in tool for DigiHuman"
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
