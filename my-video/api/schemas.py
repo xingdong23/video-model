@@ -19,7 +19,7 @@ class APIResponse(BaseModel):
     error: Optional[ErrorDetail] = None
 
 
-# ── Voice ──
+# ── TTS ──
 
 
 class VoiceSynthesizeRequest(BaseModel):
@@ -45,7 +45,7 @@ class SpeakerItem(BaseModel):
     vid: int
 
 
-# ── Digital Human ──
+# ── Avatar ──
 
 
 class DigitalHumanGenerateRequest(BaseModel):
@@ -105,7 +105,7 @@ class SubtitleBurnRequest(BaseModel):
     callback_url: Optional[str] = None
 
 
-# ── BGM ──
+# ── Audio Mixer ──
 
 
 class BgmMixRequest(BaseModel):
@@ -125,7 +125,7 @@ class BgmTrackItem(BaseModel):
     relative_path: str
 
 
-# ── Rewrite ──
+# ── Copywriter ──
 
 
 class RewriteAutoRequest(BaseModel):
@@ -137,7 +137,7 @@ class RewriteInstructionRequest(BaseModel):
     instruction: str
 
 
-# ── Douyin ──
+# ── Scraper ──
 
 
 class DouyinTranscribeRequest(BaseModel):
@@ -154,7 +154,7 @@ class DouyinExistingRequest(BaseModel):
     file_id: str
 
 
-# ── Workflow (grouped config) ──
+# ── Pipeline (grouped config) ──
 
 
 class AudioSourceConfig(BaseModel):

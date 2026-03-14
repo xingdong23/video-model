@@ -25,8 +25,8 @@ Execute the test using the Python test script at `tests/test_pipeline.py` in the
 **Step 2: Run the pipeline test**
 Run the test script with the conda Python environment:
 ```bash
-cd /home/claude/workspace/video-model/my-video
-/home/claude/miniconda3/envs/myvideo/bin/python tests/test_pipeline.py \
+cd /home/claude/workspace/video-model/digihuman
+/home/claude/miniconda3/envs/digihuman/bin/python tests/test_pipeline.py \
   [--material-dir /path/to/dir] \
   [--douyin-url "URL"] \
   --mode step_by_step

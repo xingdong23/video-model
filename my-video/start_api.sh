@@ -1,12 +1,12 @@
 #!/bin/bash
-# my-video API server startup script
+# DigiHuman API server startup script
 # Usage: ./start_api.sh
 # Environment variables:
 #   CUDA_VISIBLE_DEVICES - set to control which GPU to use (default: 0)
 
 set -e
 
-CONDA_ENV="/home/claude/miniconda3/envs/myvideo"
+CONDA_ENV="/home/claude/miniconda3/envs/digihuman"
 PYTHON="$CONDA_ENV/bin/python"
 FFMPEG="$CONDA_ENV/bin/ffmpeg"
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -15,9 +15,9 @@ PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 
 # Export ffmpeg path for all engines that need it
-export MYVIDEO_DIGITAL_HUMAN_FFMPEG_BIN="$FFMPEG"
-export MYVIDEO_SUBTITLE_FFMPEG_BIN="$FFMPEG"
-export MYVIDEO_BGM_FFMPEG_BIN="$FFMPEG"
+export DIGIHUMAN_DIGITAL_HUMAN_FFMPEG_BIN="$FFMPEG"
+export DIGIHUMAN_SUBTITLE_FFMPEG_BIN="$FFMPEG"
+export DIGIHUMAN_BGM_FFMPEG_BIN="$FFMPEG"
 
 # Ensure conda bin is on PATH (for any subprocess that shells out to ffmpeg)
 export PATH="$CONDA_ENV/bin:$PATH"

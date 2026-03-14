@@ -1,4 +1,4 @@
-# my-video Subtitle
+# DigiHuman Subtitle
 
 从主项目抽离出来的独立字幕模块，负责三件事：
 
@@ -6,7 +6,7 @@
 - 用 OpenAI 兼容接口可选纠正字幕中的错别字和多音字
 - 优先用 `ffmpeg` 烧录字幕，缺少 `subtitles` 过滤器时自动回退到 `moviepy + Pillow`
 
-它不再依赖主项目里的 Gradio、固定 `subtitle.srt` 路径、Windows `python.exe` 子进程，复制 `my-video/subtitle` 到别的工程后也可以单独运行。
+它不再依赖主项目里的 Gradio、固定 `subtitle.srt` 路径、Windows `python.exe` 子进程，复制 `digihuman/subtitle` 到别的工程后也可以单独运行。
 
 ## 用人话说
 
@@ -104,7 +104,7 @@
 ## 安装
 
 ```bash
-cd /Users/xingdong/workspace/HD_HUMAN/my-video
+cd /path/to/digihuman
 python3 -m venv .venv
 .venv/bin/pip install --upgrade pip
 .venv/bin/pip install -r subtitle/requirements.txt
@@ -132,7 +132,7 @@ python3 -m venv .venv
 从音频生成字幕：
 
 ```bash
-cd /Users/xingdong/workspace/HD_HUMAN/my-video
+cd /path/to/digihuman
 .venv/bin/python -m subtitle generate \
   --input /absolute/path/to/test.wav \
   --output subtitle/output/test.srt
@@ -141,7 +141,7 @@ cd /Users/xingdong/workspace/HD_HUMAN/my-video
 从视频直接生成字幕：
 
 ```bash
-cd /Users/xingdong/workspace/HD_HUMAN/my-video
+cd /path/to/digihuman
 .venv/bin/python -m subtitle generate \
   --input /absolute/path/to/test.mp4 \
   --output subtitle/output/test.srt
@@ -150,7 +150,7 @@ cd /Users/xingdong/workspace/HD_HUMAN/my-video
 生成后直接纠错：
 
 ```bash
-cd /Users/xingdong/workspace/HD_HUMAN/my-video
+cd /path/to/digihuman
 .venv/bin/python -m subtitle generate \
   --input /absolute/path/to/test.mp4 \
   --output subtitle/output/test.srt \
@@ -163,7 +163,7 @@ cd /Users/xingdong/workspace/HD_HUMAN/my-video
 对已有字幕单独纠错：
 
 ```bash
-cd /Users/xingdong/workspace/HD_HUMAN/my-video
+cd /path/to/digihuman
 .venv/bin/python -m subtitle correct \
   --subtitle subtitle/output/test.srt \
   --api-key "$SUBTITLE_LLM_API_KEY" \
@@ -174,7 +174,7 @@ cd /Users/xingdong/workspace/HD_HUMAN/my-video
 烧录字幕：
 
 ```bash
-cd /Users/xingdong/workspace/HD_HUMAN/my-video
+cd /path/to/digihuman
 .venv/bin/python -m subtitle burn \
   --video /absolute/path/to/test.mp4 \
   --subtitle subtitle/output/test.srt \
@@ -184,7 +184,7 @@ cd /Users/xingdong/workspace/HD_HUMAN/my-video
 指定字体文件和样式：
 
 ```bash
-cd /Users/xingdong/workspace/HD_HUMAN/my-video
+cd /path/to/digihuman
 .venv/bin/python -m subtitle burn \
   --video /absolute/path/to/test.mp4 \
   --subtitle subtitle/output/test.srt \
@@ -270,4 +270,4 @@ cd /Users/xingdong/workspace/HD_HUMAN/my-video
 - `python -m subtitle generate --input ../10s.mp4 --model tiny --device cpu`
 - `python -m subtitle correct` 对接本地 fake API
 - `python -m subtitle burn` 在本机缺少 `ffmpeg subtitles` 过滤器时自动走 Python 回退，并成功生成
-  [burn_output_small.mp4](/Users/xingdong/workspace/HD_HUMAN/my-video/subtitle/output/test_assets/burn_output_small.mp4)
+  [burn_output_small.mp4](output/test_assets/burn_output_small.mp4)
