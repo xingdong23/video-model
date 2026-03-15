@@ -273,6 +273,22 @@ class SubtitleEngine:
         if not input_subtitle.exists():
             raise FileNotFoundError("Subtitle file not found: %s" % input_subtitle)
 
+        # 探测视频高度，按比例自动缩放字体（基准：1080p @ font_size=24）
+        # libass force_style 的 FontSize 是相对 PlayResY 的逻辑像素
+        # 固定 PlayResY=1080 作为参考分辨率，字体大小统一在该坐标系下定义
+        try:
+            import cv2 as _cv2
+            cap = _cv2.VideoCapture(str(input_video))
+            _video_h = int(cap.get(_cv2.CAP_PROP_FRAME_HEIGHT))
+            cap.release()
+        except Exception:
+            _video_h = 1080
+        # PlayResY=1080 坐标系下：字体、边距都基于 1080 比例
+        PLAY_RES_Y = 1080
+        scale = PLAY_RES_Y / max(_video_h, 1)
+        scaled_font_size = max(int(round(font_size * scale)), 4)
+        scaled_margin = max(int(round(bottom_margin * scale)), 4)
+
         destination = (
             Path(output_path).expanduser().resolve()
             if output_path
@@ -304,12 +320,14 @@ class SubtitleEngine:
             style_parts.append("FontName=%s" % resolved_font_name)
         style_parts.extend(
             [
-                "FontSize=%s" % int(font_size),
+                # PlayResY 固定参考分辨率，使字体大小与视频分辨率无关
+                "PlayResY=%s" % PLAY_RES_Y,
+                "FontSize=%s" % scaled_font_size,
                 "PrimaryColour=%s" % self._convert_ass_color(font_color),
                 "OutlineColour=%s" % self._convert_ass_color(outline_color),
                 "Outline=%s" % int(outline),
                 "WrapStyle=%s" % int(wrap_style),
-                "MarginV=%s" % int(bottom_margin),
+                "MarginV=%s" % scaled_margin,
             ]
         )
 
