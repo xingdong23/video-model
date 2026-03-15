@@ -39,6 +39,21 @@ class RuntimeSelection:
     description: str
 
 
+def _is_tensorrt_loadable() -> bool:
+    """实际尝试加载 TensorRT provider，避免 libnvinfer 缺失时 ORT 把整个 providers 回退到 CPU。"""
+    try:
+        import ctypes
+        ctypes.CDLL("libnvinfer.so.10")
+        return True
+    except OSError:
+        pass
+    try:
+        ctypes.CDLL("libnvinfer.so.8")
+        return True
+    except OSError:
+        return False
+
+
 def resolve_runtime(runtime: str = "auto") -> RuntimeSelection:
     normalized = runtime.lower().strip()
     if normalized not in {"auto", "cuda", "cpu", "tensorrt"}:
@@ -46,7 +61,7 @@ def resolve_runtime(runtime: str = "auto") -> RuntimeSelection:
 
     available_providers = set(ort.get_available_providers())
     cuda_ready = torch.cuda.is_available() and "CUDAExecutionProvider" in available_providers
-    trt_ready = cuda_ready and "TensorrtExecutionProvider" in available_providers
+    trt_ready = cuda_ready and "TensorrtExecutionProvider" in available_providers and _is_tensorrt_loadable()
 
     if normalized == "tensorrt":
         if not trt_ready:

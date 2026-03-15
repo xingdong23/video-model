@@ -721,7 +721,10 @@ class LstmSync:
                     if n == 1:
                         smoothed = smooth_buf[0]
                     else:
-                        w = torch.from_numpy(_smooth_weights[-n:]).float()
+                        # 权重必须与缓存帧在同一 device，否则 CUDA 路径下触发 device mismatch
+                        w = torch.from_numpy(_smooth_weights[-n:]).to(
+                            device=smooth_buf[0].device, dtype=smooth_buf[0].dtype
+                        )
                         w = w / w.sum()
                         smoothed = sum(w[i] * smooth_buf[i] for i in range(n))
 
