@@ -263,13 +263,34 @@ class AlignRestore:
         erosion_radius = torch.clamp(w_edge * 2, min=1)
         kernel_h = max(int(torch.max(torch.ceil(erosion_radius.float() * float(scale_h))).item()), 1)
         kernel_w = max(int(torch.max(torch.ceil(erosion_radius.float() * float(scale_w))).item()), 1)
-        # 大 kernel 的 kornia erosion 内部用 F.unfold，4K 帧 + 大 kernel 会 OOM（TB 级显存需求）
-        # 改为 cv2.erode（CPU），对每张 mask 单独处理后搬回 GPU
-        ellipse_cv2 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_w, kernel_h))
-        inv_mask_center_np = inv_mask_erosion.squeeze(1).cpu().numpy()  # (B, H, W)
-        eroded_list = [cv2.erode((m * 255).astype(np.uint8), ellipse_cv2).astype(np.float32) / 255.0 for m in inv_mask_center_np]
-        inv_mask_center = torch.from_numpy(np.stack(eroded_list, axis=0)).unsqueeze(1).to(device=self.device, dtype=self.dtype)
 
+        # 对大 kernel 的 erosion + gaussian blur 操作在 1/4 分辨率下做：
+        #   kornia.morphology.erosion(F.unfold) 和 cv2.erode 在 4K 全帧 + 大 kernel 时极慢
+        #   降采样 4x 后用 F.max_pool2d（GPU min-pool 模拟 erosion）+ 高斯模糊，再上采样回来
+        #   视觉质量无差异（mask 本身就是平滑函数）
+        MASK_SCALE = 4
+        sh, sw = max(height // MASK_SCALE, 1), max(width // MASK_SCALE, 1)
+        inv_mask_small = F.interpolate(inv_mask_erosion.float(), size=(sh, sw), mode="area")
+        kh_s = max((kernel_h + MASK_SCALE - 1) // MASK_SCALE, 1)
+        kw_s = max((kernel_w + MASK_SCALE - 1) // MASK_SCALE, 1)
+        # min-pool = erosion on GPU (memory-efficient, O(B×C×H×W) memory)
+        inv_mask_center_small = -F.max_pool2d(-inv_mask_small, kernel_size=(kh_s, kw_s), stride=1,
+                                               padding=(kh_s // 2, kw_s // 2))
+        blur_size = max(int(torch.max(w_edge * 4 + 1).item()), 3)
+        if blur_size % 2 == 0:
+            blur_size += 1
+        blur_small = max(((blur_size + MASK_SCALE - 1) // MASK_SCALE) | 1, 3)
+        if blur_small % 2 == 0:
+            blur_small += 1
+        sigma_s = max(0.3 * ((blur_small - 1) * 0.5 - 1) + 0.8, 0.1)
+        inv_soft_mask_small = kornia.filters.gaussian_blur2d(
+            inv_mask_center_small, (blur_small, blur_small), (sigma_s, sigma_s)
+        )
+        # 上采样回全分辨率（bilinear 保持边缘平滑）
+        inv_soft_mask = F.interpolate(inv_soft_mask_small.to(dtype=self.dtype),
+                                      size=(height, width), mode="bilinear", align_corners=False)
+
+        # 颜色校正：将生成脸的色调统计对齐到原始帧（均值+方差匹配）
         mask_for_color = (inv_mask_erosion_t > 0.5).to(dtype=self.dtype)
         mask_counts = mask_for_color.sum(dim=(2, 3)).clamp(min=1.0)
         valid_channels = mask_counts > 100.0
@@ -284,18 +305,8 @@ class AlignRestore:
             + orig_mean[..., None, None]
         )
         inv_face = torch.where(valid_channels[..., None, None], adjusted_face, inv_face).clamp(0, 255)
-
         pasted_face = inv_mask_erosion_t * inv_face
 
-        blur_size = max(int(torch.max(w_edge * 4 + 1).item()), 3)
-        if blur_size % 2 == 0:
-            blur_size += 1
-        sigma = 0.3 * ((blur_size - 1) * 0.5 - 1) + 0.8
-        inv_soft_mask = kornia.filters.gaussian_blur2d(
-            inv_mask_center,
-            (blur_size, blur_size),
-            (sigma, sigma),
-        )
         inv_soft_mask_3d = inv_soft_mask.expand(-1, 3, -1, -1)
         blended = inv_soft_mask_3d * pasted_face + (1 - inv_soft_mask_3d) * input_tensor
         blended = rearrange(blended, "b c h w -> b h w c").contiguous().clamp(0, 255).to(dtype=torch.uint8)

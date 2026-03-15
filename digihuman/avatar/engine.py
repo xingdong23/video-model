@@ -154,7 +154,7 @@ class DigitalHumanEngine:
         face: str | None = None,
         video: str | os.PathLike | None = None,
         output_path: str | os.PathLike | None = None,
-        batch_size: int = 4,
+        batch_size: int = 16,
         sync_offset: int = 0,
         scale_h: float = 1.6,
         scale_w: float = 3.6,
