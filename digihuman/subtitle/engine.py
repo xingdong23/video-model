@@ -273,21 +273,12 @@ class SubtitleEngine:
         if not input_subtitle.exists():
             raise FileNotFoundError("Subtitle file not found: %s" % input_subtitle)
 
-        # 探测视频高度，按比例自动缩放字体（基准：1080p @ font_size=24）
-        # libass force_style 的 FontSize 是相对 PlayResY 的逻辑像素
-        # 固定 PlayResY=1080 作为参考分辨率，字体大小统一在该坐标系下定义
-        try:
-            import cv2 as _cv2
-            cap = _cv2.VideoCapture(str(input_video))
-            _video_h = int(cap.get(_cv2.CAP_PROP_FRAME_HEIGHT))
-            cap.release()
-        except Exception:
-            _video_h = 1080
-        # PlayResY=1080 坐标系下：字体、边距都基于 1080 比例
+        # 固定 PlayResY=1080 作为 libass 参考坐标系
+        # 不缩放 font_size：FontSize=24 在 PlayResY=1080 下渲染到 4K(3840px) = 24×3840/1080≈85px
+        # 原来没有 PlayResY 时 libass 默认 PlayResY=288，FontSize=24→320px 过大
         PLAY_RES_Y = 1080
-        scale = PLAY_RES_Y / max(_video_h, 1)
-        scaled_font_size = max(int(round(font_size * scale)), 4)
-        scaled_margin = max(int(round(bottom_margin * scale)), 4)
+        scaled_font_size = font_size        # 保持用户指定值，坐标系已固定
+        scaled_margin = bottom_margin
 
         destination = (
             Path(output_path).expanduser().resolve()
