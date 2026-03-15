@@ -6,7 +6,6 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -56,18 +55,61 @@ class ProjectStore:
 
     def get(self, project_id: str) -> dict | None:
         with self._lock:
-            return self._read(project_id)
+            data = self._read(project_id)
+            if data is None:
+                return None
+            # Migrate legacy dict steps to list format on read
+            migrated = False
+            for step_name, step_val in data.get("steps", {}).items():
+                if isinstance(step_val, dict):
+                    data["steps"][step_name] = self._normalize_step_value(step_val)
+                    migrated = True
+            if migrated:
+                self._write(data)
+            return data
 
     VALID_STEPS = {"douyin", "script", "voice", "digital_human", "subtitle", "bgm"}
 
-    def update_step(self, project_id: str, step: str, step_data: dict) -> dict | None:
+    @staticmethod
+    def _normalize_step_value(val) -> list:
+        """Convert legacy dict format to list format for backward compatibility."""
+        if isinstance(val, list):
+            return val
+        if isinstance(val, dict):
+            # Wrap old dict format with default meta fields
+            record = {
+                "record_id": val.get("record_id", uuid.uuid4().hex[:8]),
+                "created_at": val.get("created_at", 0),
+                "parent_record_id": val.get("parent_record_id"),
+                **{k: v for k, v in val.items() if k not in ("record_id", "created_at", "parent_record_id")},
+            }
+            return [record]
+        return []
+
+    _META_KEYS = frozenset({"record_id", "created_at", "parent_record_id"})
+
+    def update_step(
+        self, project_id: str, step: str, step_data: dict,
+        parent_record_id: str | None = None,
+    ) -> dict | None:
         if step not in self.VALID_STEPS:
             raise ValueError(f"Invalid step name: {step!r}, must be one of {self.VALID_STEPS}")
         with self._lock:
             data = self._read(project_id)
             if data is None:
                 return None
-            data["steps"][step] = step_data
+            clean_data = {k: v for k, v in step_data.items() if k not in self._META_KEYS}
+            record = {
+                "record_id": uuid.uuid4().hex[:8],
+                "created_at": time.time(),
+                "parent_record_id": parent_record_id,
+                **clean_data,
+            }
+            # Ensure steps[step] is a list, then append
+            existing = data["steps"].get(step)
+            records = self._normalize_step_value(existing) if existing else []
+            records.append(record)
+            data["steps"][step] = records
             data["updated_at"] = time.time()
             # Auto-update title from first meaningful content
             if not data["title"] and step == "douyin" and step_data.get("transcript"):
@@ -94,12 +136,18 @@ class ProjectStore:
             for p in self.root.glob("*.json"):
                 try:
                     data = json.loads(p.read_text(encoding="utf-8"))
+                    steps = data.get("steps", {})
+                    # Count steps that have at least one record
+                    steps_done = sum(
+                        1 for v in steps.values()
+                        if (isinstance(v, list) and v) or (isinstance(v, dict) and v)
+                    )
                     projects.append({
                         "project_id": data["project_id"],
                         "title": data.get("title", ""),
                         "created_at": data.get("created_at", 0),
                         "updated_at": data.get("updated_at", 0),
-                        "steps_done": len(data.get("steps", {})),
+                        "steps_done": steps_done,
                     })
                 except Exception:
                     logger.debug("Failed to read project file: %s", p, exc_info=True)
@@ -114,8 +162,12 @@ class ProjectStore:
             for p in self.root.glob("*.json"):
                 try:
                     data = json.loads(p.read_text(encoding="utf-8"))
-                    douyin = data.get("steps", {}).get("douyin", {})
-                    if douyin.get("video_file_id") == video_file_id:
+                    douyin = data.get("steps", {}).get("douyin")
+                    if douyin is None:
+                        continue
+                    # Handle both list (new) and dict (legacy) formats
+                    records = self._normalize_step_value(douyin)
+                    if any(r.get("video_file_id") == video_file_id for r in records):
                         results.append(data)
                 except Exception:
                     logger.debug("Failed to read project file: %s", p, exc_info=True)
@@ -126,6 +178,19 @@ class ProjectStore:
     # Keys in step data that hold file_id references
     _FILE_ID_KEYS = ("video_file_id", "file_id", "srt_file_id", "burned_file_id", "upload_video_file_id")
 
+    @classmethod
+    def _extract_file_ids_from_record(cls, record: dict) -> set[str]:
+        """Extract file_id values from a single step record."""
+        ids: set[str] = set()
+        for key in cls._FILE_ID_KEYS:
+            fid = record.get(key)
+            if fid:
+                ids.add(fid)
+        for f in record.get("files", []):
+            if isinstance(f, dict) and f.get("file_id"):
+                ids.add(f["file_id"])
+        return ids
+
     def collect_all_referenced_file_ids(self) -> set[str]:
         """Return every file_id referenced by any project step."""
         file_ids: set[str] = set()
@@ -133,17 +198,10 @@ class ProjectStore:
             for p in self.root.glob("*.json"):
                 try:
                     data = json.loads(p.read_text(encoding="utf-8"))
-                    for step_data in data.get("steps", {}).values():
-                        if not isinstance(step_data, dict):
-                            continue
-                        for key in self._FILE_ID_KEYS:
-                            fid = step_data.get(key)
-                            if fid:
-                                file_ids.add(fid)
-                        # Also collect file_ids from nested files lists (douyin step)
-                        for f in step_data.get("files", []):
-                            if isinstance(f, dict) and f.get("file_id"):
-                                file_ids.add(f["file_id"])
+                    for step_val in data.get("steps", {}).values():
+                        records = self._normalize_step_value(step_val)
+                        for record in records:
+                            file_ids.update(self._extract_file_ids_from_record(record))
                 except Exception:
                     logger.debug("Failed to read project file: %s", p, exc_info=True)
                     continue
@@ -154,18 +212,12 @@ class ProjectStore:
         file_ids: set[str] = set()
         with self._lock:
             data = self._read(project_id)
-        if data is None:
-            return file_ids
-        for step_data in data.get("steps", {}).values():
-            if not isinstance(step_data, dict):
-                continue
-            for key in self._FILE_ID_KEYS:
-                fid = step_data.get(key)
-                if fid:
-                    file_ids.add(fid)
-            for f in step_data.get("files", []):
-                if isinstance(f, dict) and f.get("file_id"):
-                    file_ids.add(f["file_id"])
+            if data is None:
+                return file_ids
+            for step_val in data.get("steps", {}).values():
+                records = self._normalize_step_value(step_val)
+                for record in records:
+                    file_ids.update(self._extract_file_ids_from_record(record))
         return file_ids
 
     def delete(self, project_id: str) -> bool:
@@ -177,13 +229,17 @@ class ProjectStore:
         return False
 
 
-_store: Optional[ProjectStore] = None
+_store: ProjectStore | None = None
+_store_lock = threading.Lock()
 
 
 def get_project_store() -> ProjectStore:
     global _store
-    if _store is None:
-        from .config import get_settings
-        settings = get_settings()
-        _store = ProjectStore(Path(settings.storage_root) / "projects")
+    if _store is not None:
+        return _store
+    with _store_lock:
+        if _store is None:
+            from .config import get_settings
+            settings = get_settings()
+            _store = ProjectStore(Path(settings.storage_root) / "projects")
     return _store

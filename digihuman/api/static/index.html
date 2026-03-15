@@ -122,6 +122,15 @@ body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft
 .log-bar .dot { width: 6px; height: 6px; border-radius: 50%; }
 .log-bar .dot.on { background: var(--green); }
 .log-bar .dot.off { background: var(--red); }
+
+/* History dropdown */
+.history-select {
+  width: 100%; padding: 5px 10px; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text); font-size: 12px; outline: none; cursor: pointer;
+  margin-top: 8px; display: none;
+}
+.history-select:focus { border-color: var(--purple); }
+.history-select.show { display: block; }
 </style>
 </head>
 <body>
@@ -147,6 +156,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft
       <div class="step-num" id="sn1">1</div>
       <div class="step-title">抖音视频处理</div>
     </div>
+    <select class="history-select" id="history-douyin" onchange="onHistorySelect('douyin', this.value)"></select>
     <div class="step-body">
       <div class="fg">
         <label>抖音分享链接</label>
@@ -181,6 +191,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft
       <div class="step-num" id="sn2">2</div>
       <div class="step-title">文案生成</div>
     </div>
+    <select class="history-select" id="history-script" onchange="onHistorySelect('script', this.value)"></select>
     <div class="step-body">
       <div class="fg">
         <label>视频文案</label>
@@ -211,6 +222,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft
       <div class="step-num" id="sn3">3</div>
       <div class="step-title">音频生成</div>
     </div>
+    <select class="history-select" id="history-voice" onchange="onHistorySelect('voice', this.value)"></select>
     <div class="step-body">
       <div class="fg-row">
         <div class="fg">
@@ -252,6 +264,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft
       <div class="step-num" id="sn4">4</div>
       <div class="step-title">视频生成</div>
     </div>
+    <select class="history-select" id="history-digital_human" onchange="onHistorySelect('digital_human', this.value)"></select>
     <div class="step-body">
       <div class="fg">
         <label>选择数字人模型</label>
@@ -301,6 +314,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft
       <div class="step-num" id="sn5">5</div>
       <div class="step-title">字幕生成</div>
     </div>
+    <select class="history-select" id="history-subtitle" onchange="onHistorySelect('subtitle', this.value)"></select>
     <div class="step-body">
       <div class="fg-row">
         <div class="fg">
@@ -362,6 +376,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft
       <div class="step-num" id="sn6">6</div>
       <div class="step-title">背景音乐生成</div>
     </div>
+    <select class="history-select" id="history-bgm" onchange="onHistorySelect('bgm', this.value)"></select>
     <div class="step-body">
       <div class="fg">
         <label>背景音乐音量</label>
@@ -425,10 +440,29 @@ const _defaultState = {
   srtFileId: null,      // Step 5 SRT output
   burnedVideoFileId: null, // Step 5 burned video
   finalVideoFileId: null,  // Current latest video file_id
+  selectedRecords: {     // Currently selected record_id per step
+    douyin: null, script: null, voice: null,
+    digital_human: null, subtitle: null, bgm: null,
+  },
 };
 const state = Object.assign({}, _defaultState, JSON.parse(localStorage.getItem('mv_state') || '{}'));
 
 function saveState() { localStorage.setItem('mv_state', JSON.stringify(state)); }
+
+// Cached full project data from server (with all step records)
+let _projectData = null;
+
+// Step parent chain: bgm → subtitle → digital_human → voice → script → douyin
+const _stepParentMap = {
+  douyin: null,
+  script: 'douyin',
+  voice: 'script',
+  digital_human: 'voice',
+  subtitle: 'digital_human',
+  bgm: 'subtitle',
+};
+const _stepOrder = ['douyin', 'script', 'voice', 'digital_human', 'subtitle', 'bgm'];
+const _stepToNum = { douyin: 1, script: 2, voice: 3, digital_human: 4, subtitle: 5, bgm: 6 };
 
 // ── Utils ──
 function log(msg) { document.getElementById('logText').textContent = msg; }
@@ -478,6 +512,17 @@ function invalidateDownstream(fromStep) {
   ds.ui.forEach(hideRes);
   ds.previews.forEach(id => { $(id).innerHTML = ''; });
   ds.steps.forEach(markUndone);
+  // Clear downstream selectedRecords; keep history dropdowns but deselect
+  const fromIdx = fromStep; // 1-based
+  _stepOrder.forEach((step, i) => {
+    if ((i + 1) > fromIdx) {
+      state.selectedRecords[step] = null;
+      const sel = $('history-' + step);
+      if (sel && sel.options.length) {
+        sel.selectedIndex = -1;
+      }
+    }
+  });
   if (fromStep <= 4) {
     $('sub-divider').style.display = 'none';
     $('btn-burn').style.display = 'none';
@@ -506,15 +551,23 @@ function resetUI() {
   $('sub-divider').style.display = 'none';
   $('btn-burn').style.display = 'none';
   $('upload-video-info').style.display = 'none';
+  // Hide all history dropdowns
+  _stepOrder.forEach(step => {
+    const sel = $('history-' + step);
+    if (sel) { sel.innerHTML = ''; sel.classList.remove('show'); }
+  });
   for (let i = 1; i <= 6; i++) markUndone(i);
 }
 
 function applyStateToUI() {
   resetUI();
-  // Step 1/2: script text + source video info
+  // Step 1: douyin transcript
   if (state.scriptText) {
     $('script-text').value = state.scriptText;
     markDone(1);
+  }
+  // Step 2: script confirmed/rewritten (only if step 2 has its own record)
+  if (state.selectedRecords.script) {
     markDone(2);
   }
   if (state.douyinVideoFileId) {
@@ -592,6 +645,8 @@ async function loadProjectList() {
 function createNewProject() {
   // Just reset UI — project will be created lazily by ensureProject() when first step completes
   Object.assign(state, _defaultState);
+  state.selectedRecords = { douyin: null, script: null, voice: null, digital_human: null, subtitle: null, bgm: null };
+  _projectData = null;
   saveState();
   resetUI();
   $('project-select').value = '';
@@ -604,6 +659,8 @@ async function deleteCurrentProject() {
   try {
     await api('DELETE', '/api/v1/projects/' + state.projectId);
     Object.assign(state, _defaultState);
+    state.selectedRecords = { douyin: null, script: null, voice: null, digital_human: null, subtitle: null, bgm: null };
+    _projectData = null;
     saveState();
     resetUI();
     await loadProjectList();
@@ -615,6 +672,8 @@ async function onProjectSelect(projectId) {
   if (!projectId) {
     // Deselected — clear state
     Object.assign(state, _defaultState);
+    state.selectedRecords = { douyin: null, script: null, voice: null, digital_human: null, subtitle: null, bgm: null };
+    _projectData = null;
     saveState();
     resetUI();
     log('已取消选择项目');
@@ -631,48 +690,286 @@ async function onProjectSelect(projectId) {
 function restoreProjectData(proj) {
   // Map project steps back to state
   Object.assign(state, _defaultState);
+  state.selectedRecords = { douyin: null, script: null, voice: null, digital_human: null, subtitle: null, bgm: null };
   state.projectId = proj.project_id;
+  _projectData = proj;
   const s = proj.steps || {};
-  if (s.douyin) {
-    state.scriptText = s.douyin.transcript || '';
-    state.douyinVideoFileId = s.douyin.video_file_id || null;
+
+  // Helper: normalize step value to array (handle legacy dict or new list)
+  function getRecords(step) {
+    const val = s[step];
+    if (!val) return [];
+    if (Array.isArray(val)) return val;
+    // Legacy dict: wrap it
+    return [val];
   }
-  if (s.script) {
-    state.scriptText = s.script.text || state.scriptText;
+
+  // Step 1 (douyin): pick the latest record as the starting point
+  const douyinRecs = getRecords('douyin');
+  if (douyinRecs.length) {
+    const latest = douyinRecs[douyinRecs.length - 1];
+    state.selectedRecords.douyin = latest.record_id || null;
+    state.scriptText = latest.transcript || '';
+    state.douyinVideoFileId = latest.video_file_id || null;
   }
-  if (s.voice) {
-    state.audioFileId = s.voice.file_id || null;
-  }
-  if (s.digital_human) {
-    state.videoFileId = s.digital_human.file_id || null;
-    state.finalVideoFileId = s.digital_human.file_id || null;
-    state.uploadVideoFileId = s.digital_human.upload_video_file_id || null;
-  }
-  if (s.subtitle) {
-    state.srtFileId = s.subtitle.srt_file_id || null;
-    if (s.subtitle.burned_file_id) {
-      state.burnedVideoFileId = s.subtitle.burned_file_id;
-      state.finalVideoFileId = s.subtitle.burned_file_id;
+
+  // Steps 2-6: follow parent_record_id chain from upstream selection
+  const chainSteps = ['script', 'voice', 'digital_human', 'subtitle', 'bgm'];
+  for (const step of chainSteps) {
+    const recs = getRecords(step);
+    if (!recs.length) continue;
+    const parentStep = _stepParentMap[step];
+    const parentRecordId = state.selectedRecords[parentStep];
+    // Find records matching the parent chain
+    const matching = recs.filter(r => r.parent_record_id === parentRecordId);
+    const chosen = matching.length ? matching[matching.length - 1] : null;
+    if (!chosen) continue;
+    state.selectedRecords[step] = chosen.record_id || null;
+    // Apply chosen record to state
+    if (step === 'script') {
+      state.scriptText = chosen.text || state.scriptText;
+    } else if (step === 'voice') {
+      state.audioFileId = chosen.file_id || null;
+    } else if (step === 'digital_human') {
+      // Skip records with no generated file_id (upload-only)
+      if (!chosen.file_id) { state.selectedRecords[step] = null; continue; }
+      state.videoFileId = chosen.file_id || null;
+      state.finalVideoFileId = chosen.file_id || null;
+      state.uploadVideoFileId = chosen.upload_video_file_id || null;
+    } else if (step === 'subtitle') {
+      state.srtFileId = chosen.srt_file_id || null;
+      if (chosen.burned_file_id) {
+        state.burnedVideoFileId = chosen.burned_file_id;
+        state.finalVideoFileId = chosen.burned_file_id;
+      }
+    } else if (step === 'bgm') {
+      if (chosen.file_id) {
+        state.finalVideoFileId = chosen.file_id;
+      }
     }
   }
-  if (s.bgm) {
-    if (s.bgm.file_id) {
-      state.finalVideoFileId = s.bgm.file_id;
-    }
-  }
+
   saveState();
   applyStateToUI();
+
+  // Render history dropdowns AFTER applyStateToUI (which calls resetUI)
+  _stepOrder.forEach(step => {
+    const recs = getRecords(step);
+    if (recs.length > 1) {
+      renderHistoryDropdown(step, recs);
+    }
+  });
 }
 
 /** Save a step result to the current project on the server. */
 async function saveStep(step, data) {
   if (!state.projectId) return;
   try {
-    await api('PUT', '/api/v1/projects/' + state.projectId + '/steps/' + step, { data });
+    // Determine parent_record_id from upstream step
+    const parentStep = _stepParentMap[step];
+    const parentRecordId = parentStep ? (state.selectedRecords[parentStep] || null) : null;
+    const r = await api('PUT', '/api/v1/projects/' + state.projectId + '/steps/' + step, {
+      data,
+      parent_record_id: parentRecordId,
+    });
+    if (r.success && r.data) {
+      // Update cached project data and find new record_id
+      _projectData = r.data;
+      const records = r.data.steps[step];
+      if (Array.isArray(records) && records.length) {
+        const newRecord = records[records.length - 1];
+        state.selectedRecords[step] = newRecord.record_id;
+        saveState();
+        renderHistoryDropdown(step, records);
+      }
+    }
     // Refresh project list to update title/steps count
     loadProjectList();
   } catch (e) {
     console.warn('Failed to save step:', e);
+  }
+}
+
+/** Render history dropdown for a step. */
+function renderHistoryDropdown(step, records) {
+  const sel = $('history-' + step);
+  if (!sel) return;
+  if (!records || records.length <= 1) {
+    sel.classList.remove('show');
+    sel.innerHTML = '';
+    return;
+  }
+  sel.classList.add('show');
+  sel.innerHTML = records.map((r, i) => {
+    const num = i + 1;
+    const time = r.created_at ? fmtTime(r.created_at) : '';
+    let info = '';
+    if (step === 'douyin') info = (r.transcript || '').substring(0, 20);
+    else if (step === 'script') info = (r.text || '').substring(0, 20);
+    else if (step === 'voice') info = r.file_id ? r.file_id.substring(0, 8) : '';
+    else if (step === 'digital_human') info = r.file_id ? r.file_id.substring(0, 8) : '';
+    else if (step === 'subtitle') info = r.srt_file_id ? r.srt_file_id.substring(0, 8) : '';
+    else if (step === 'bgm') info = r.file_id ? r.file_id.substring(0, 8) : '';
+    const label = '#' + num + ' · ' + time + (info ? ' · ' + info : '');
+    const selected = (r.record_id === state.selectedRecords[step]) ? ' selected' : '';
+    return '<option value="' + (r.record_id || i) + '"' + selected + '>' + label + '</option>';
+  }).join('');
+}
+
+/** Handle history dropdown selection change. */
+function onHistorySelect(step, recordId) {
+  if (!_projectData) return;
+  const records = _projectData.steps[step];
+  if (!Array.isArray(records)) return;
+  const record = records.find(r => r.record_id === recordId);
+  if (!record) return;
+
+  state.selectedRecords[step] = recordId;
+
+  // Update state and UI based on step type
+  if (step === 'douyin') {
+    state.scriptText = record.transcript || '';
+    state.douyinVideoFileId = record.video_file_id || null;
+    $('script-text').value = state.scriptText;
+    if (state.douyinVideoFileId) {
+      showRes('dy-res', '(已切换) 素材视频: ' + state.douyinVideoFileId);
+      $('dy-preview').innerHTML = videoPlayer(state.douyinVideoFileId);
+    } else {
+      showRes('dy-res', '(已切换) 文案已加载');
+      $('dy-preview').innerHTML = '';
+    }
+  } else if (step === 'script') {
+    state.scriptText = record.text || '';
+    $('script-text').value = state.scriptText;
+    showRes('rewrite-res', '(已切换) 文案已加载');
+  } else if (step === 'voice') {
+    state.audioFileId = record.file_id || null;
+    if (state.audioFileId) {
+      $('tts-preview').innerHTML = audioPlayer(state.audioFileId);
+      showRes('tts-res', '(已切换) file_id: ' + state.audioFileId);
+    }
+  } else if (step === 'digital_human') {
+    state.videoFileId = record.file_id || null;
+    state.uploadVideoFileId = record.upload_video_file_id || null;
+    state.finalVideoFileId = record.file_id || null;
+    if (state.videoFileId) {
+      $('dh-preview').innerHTML = videoPlayer(state.videoFileId);
+      showRes('dh-res', '(已切换) file_id: ' + state.videoFileId);
+    }
+  } else if (step === 'subtitle') {
+    state.srtFileId = record.srt_file_id || null;
+    state.burnedVideoFileId = record.burned_file_id || null;
+    if (record.burned_file_id) state.finalVideoFileId = record.burned_file_id;
+    if (state.srtFileId) {
+      showRes('sub-res', '(已切换) SRT file_id: ' + state.srtFileId);
+      $('sub-divider').style.display = 'block';
+      $('btn-burn').style.display = 'block';
+    }
+    if (state.burnedVideoFileId) {
+      $('burn-preview').innerHTML = videoPlayer(state.burnedVideoFileId);
+    } else {
+      $('burn-preview').innerHTML = '';
+    }
+  } else if (step === 'bgm') {
+    if (record.file_id) {
+      state.finalVideoFileId = record.file_id;
+      $('bgm-preview').innerHTML = videoPlayer(record.file_id);
+      showRes('bgm-res', '(已切换) file_id: ' + record.file_id);
+    }
+  }
+
+  // Update downstream: find matching records by parent chain
+  _updateDownstreamAfterSelect(step);
+  saveState();
+}
+
+/** After selecting a record in step, update downstream steps to match. */
+function _updateDownstreamAfterSelect(fromStep) {
+  const fromIdx = _stepOrder.indexOf(fromStep);
+  if (fromIdx < 0) return;
+  for (let i = fromIdx + 1; i < _stepOrder.length; i++) {
+    const step = _stepOrder[i];
+    const parentStep = _stepParentMap[step];
+    const parentRecordId = state.selectedRecords[parentStep];
+    const records = _projectData?.steps[step];
+    if (!Array.isArray(records) || !records.length) {
+      state.selectedRecords[step] = null;
+      continue;
+    }
+    // Find records whose parent matches
+    const matching = records.filter(r => r.parent_record_id === parentRecordId);
+    if (matching.length) {
+      const latest = matching[matching.length - 1];
+      state.selectedRecords[step] = latest.record_id;
+      renderHistoryDropdown(step, records);
+      $('history-' + step).value = latest.record_id;
+      // Apply record to state
+      _applyRecordToState(step, latest);
+    } else {
+      // No matching downstream records — clear UI but keep history dropdown
+      state.selectedRecords[step] = null;
+      _clearStepUI(step);
+      renderHistoryDropdown(step, records);
+    }
+  }
+}
+
+function _applyRecordToState(step, record) {
+  if (step === 'script') {
+    state.scriptText = record.text || '';
+    $('script-text').value = state.scriptText;
+  } else if (step === 'voice') {
+    state.audioFileId = record.file_id || null;
+    if (state.audioFileId) {
+      $('tts-preview').innerHTML = audioPlayer(state.audioFileId);
+      showRes('tts-res', '(已恢复) file_id: ' + state.audioFileId);
+      markDone(3);
+    }
+  } else if (step === 'digital_human') {
+    state.videoFileId = record.file_id || null;
+    state.finalVideoFileId = record.file_id || null;
+    state.uploadVideoFileId = record.upload_video_file_id || null;
+    if (state.videoFileId) {
+      $('dh-preview').innerHTML = videoPlayer(state.videoFileId);
+      showRes('dh-res', '(已恢复) file_id: ' + state.videoFileId);
+      markDone(4);
+    }
+  } else if (step === 'subtitle') {
+    state.srtFileId = record.srt_file_id || null;
+    state.burnedVideoFileId = record.burned_file_id || null;
+    if (record.burned_file_id) state.finalVideoFileId = record.burned_file_id;
+    if (state.srtFileId) {
+      showRes('sub-res', '(已恢复) SRT file_id: ' + state.srtFileId);
+      $('sub-divider').style.display = 'block';
+      $('btn-burn').style.display = 'block';
+      markDone(5);
+    }
+    if (state.burnedVideoFileId) $('burn-preview').innerHTML = videoPlayer(state.burnedVideoFileId);
+  } else if (step === 'bgm') {
+    if (record.file_id) {
+      state.finalVideoFileId = record.file_id;
+      $('bgm-preview').innerHTML = videoPlayer(record.file_id);
+      showRes('bgm-res', '(已恢复) file_id: ' + record.file_id);
+      markDone(6);
+    }
+  }
+}
+
+function _clearStepUI(step) {
+  const num = _stepToNum[step];
+  markUndone(num);
+  if (step === 'voice') {
+    hideRes('tts-res'); $('tts-preview').innerHTML = '';
+    state.audioFileId = null;
+  } else if (step === 'digital_human') {
+    hideRes('dh-res'); $('dh-preview').innerHTML = '';
+    state.videoFileId = null; state.finalVideoFileId = null;
+  } else if (step === 'subtitle') {
+    hideRes('sub-res'); hideRes('burn-res'); $('burn-preview').innerHTML = '';
+    state.srtFileId = null; state.burnedVideoFileId = null;
+    $('sub-divider').style.display = 'none'; $('btn-burn').style.display = 'none';
+  } else if (step === 'bgm') {
+    hideRes('bgm-res'); $('bgm-preview').innerHTML = '';
   }
 }
 
@@ -1123,8 +1420,6 @@ async function onVideoFileSelected(input) {
       $('upload-video-info').style.display = 'block';
       $('upload-video-tag').textContent = 'file_id: ' + r.data.file_id;
       log('视频素材上传完成: ' + r.data.file_id);
-      // Save upload to project if exists
-      if (state.projectId) saveStep('digital_human', { upload_video_file_id: r.data.file_id });
     } else {
       log('视频上传失败');
     }

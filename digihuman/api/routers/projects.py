@@ -19,6 +19,7 @@ class CreateProjectRequest(BaseModel):
 
 class UpdateStepRequest(BaseModel):
     data: dict
+    parent_record_id: str | None = None
 
 
 # ── Endpoints ──
@@ -49,7 +50,7 @@ async def get_project(project_id: str):
 async def update_step(project_id: str, step: str, req: UpdateStepRequest):
     store = get_project_store()
     try:
-        project = store.update_step(project_id, step, req.data)
+        project = store.update_step(project_id, step, req.data, parent_record_id=req.parent_record_id)
     except ValueError as e:
         raise APIError(ErrorCode.VALIDATION_ERROR, str(e), 400)
     if project is None:
