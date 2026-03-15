@@ -305,10 +305,10 @@ class AlignRestore:
             + orig_mean[..., None, None]
         )
         inv_face = torch.where(valid_channels[..., None, None], adjusted_face, inv_face).clamp(0, 255)
-        pasted_face = inv_mask_erosion_t * inv_face
 
         inv_soft_mask_3d = inv_soft_mask.expand(-1, 3, -1, -1)
-        blended = inv_soft_mask_3d * pasted_face + (1 - inv_soft_mask_3d) * input_tensor
+        # 直接用 inv_soft_mask_3d 做融合，避免 pasted_face 用 inv_mask_erosion_t（硬边）与软遮罩不对齐
+        blended = inv_soft_mask_3d * inv_face + (1 - inv_soft_mask_3d) * input_tensor
         blended = rearrange(blended, "b c h w -> b h w c").contiguous().clamp(0, 255).to(dtype=torch.uint8)
         return blended.cpu().numpy()
 
