@@ -263,8 +263,12 @@ class AlignRestore:
         erosion_radius = torch.clamp(w_edge * 2, min=1)
         kernel_h = max(int(torch.max(torch.ceil(erosion_radius.float() * float(scale_h))).item()), 1)
         kernel_w = max(int(torch.max(torch.ceil(erosion_radius.float() * float(scale_w))).item()), 1)
-        ellipse_kernel = self._get_ellipse_kernel(kernel_h, kernel_w)
-        inv_mask_center = kornia.morphology.erosion(inv_mask_erosion, ellipse_kernel)
+        # 大 kernel 的 kornia erosion 内部用 F.unfold，4K 帧 + 大 kernel 会 OOM（TB 级显存需求）
+        # 改为 cv2.erode（CPU），对每张 mask 单独处理后搬回 GPU
+        ellipse_cv2 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_w, kernel_h))
+        inv_mask_center_np = inv_mask_erosion.squeeze(1).cpu().numpy()  # (B, H, W)
+        eroded_list = [cv2.erode((m * 255).astype(np.uint8), ellipse_cv2).astype(np.float32) / 255.0 for m in inv_mask_center_np]
+        inv_mask_center = torch.from_numpy(np.stack(eroded_list, axis=0)).unsqueeze(1).to(device=self.device, dtype=self.dtype)
 
         mask_for_color = (inv_mask_erosion_t > 0.5).to(dtype=self.dtype)
         mask_counts = mask_for_color.sum(dim=(2, 3)).clamp(min=1.0)
