@@ -160,7 +160,7 @@ class AlignRestore:
         # Horizontal component: Gaussian centered on face, sigma≈0.26w
         # At ±1σ (~mouth corners) value ≈ 0.61, at ±2σ (cheeks) value ≈ 0.14
         cx = (w - 1) / 2.0
-        sigma_x = w * 0.26
+        sigma_x = w * 0.35
         hx = np.exp(-0.5 * ((np.arange(w, dtype=np.float32) - cx) / sigma_x) ** 2)
 
         mask_np = (vy[:, None] * hx[None, :]).astype(np.float32)
@@ -263,32 +263,29 @@ class AlignRestore:
         erosion_radius = torch.clamp(w_edge * 2, min=1)
         kernel_h = max(int(torch.max(torch.ceil(erosion_radius.float() * float(scale_h))).item()), 1)
         kernel_w = max(int(torch.max(torch.ceil(erosion_radius.float() * float(scale_w))).item()), 1)
-
-        # 对大 kernel 的 erosion + gaussian blur 操作在 1/4 分辨率下做：
-        #   kornia.morphology.erosion(F.unfold) 和 cv2.erode 在 4K 全帧 + 大 kernel 时极慢
-        #   降采样 4x 后用 F.max_pool2d（GPU min-pool 模拟 erosion）+ 高斯模糊，再上采样回来
-        #   视觉质量无差异（mask 本身就是平滑函数）
-        MASK_SCALE = 4
-        sh, sw = max(height // MASK_SCALE, 1), max(width // MASK_SCALE, 1)
-        inv_mask_small = F.interpolate(inv_mask_erosion.float(), size=(sh, sw), mode="area")
-        kh_s = max((kernel_h + MASK_SCALE - 1) // MASK_SCALE, 1)
-        kw_s = max((kernel_w + MASK_SCALE - 1) // MASK_SCALE, 1)
-        # min-pool = erosion on GPU (memory-efficient, O(B×C×H×W) memory)
-        inv_mask_center_small = -F.max_pool2d(-inv_mask_small, kernel_size=(kh_s, kw_s), stride=1,
-                                               padding=(kh_s // 2, kw_s // 2))
+        # erosion 在 1/4 分辨率做（mask 边界精度够用，速度快）
+        # gaussian blur 在全分辨率做（决定嘴角融合边界质量，不能降采样）
+        ERODE_SCALE = 4
+        sh, sw = max(height // ERODE_SCALE, 1), max(width // ERODE_SCALE, 1)
+        kh_s = max((kernel_h + ERODE_SCALE - 1) // ERODE_SCALE, 1)
+        kw_s = max((kernel_w + ERODE_SCALE - 1) // ERODE_SCALE, 1)
+        ellipse_cv2 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kw_s, kh_s))
+        inv_mask_small_np = F.interpolate(inv_mask_erosion.float(), size=(sh, sw), mode="area").squeeze(1).cpu().numpy()
+        eroded_small = [cv2.erode((m * 255).astype(np.uint8), ellipse_cv2).astype(np.float32) / 255.0
+                        for m in inv_mask_small_np]
+        inv_mask_center_small = torch.from_numpy(np.stack(eroded_small, axis=0)).unsqueeze(1).to(
+            device=self.device, dtype=self.dtype)
+        # 上采样回全分辨率，再做全分辨率高斯模糊（保留嘴角边界精度）
+        inv_mask_center = F.interpolate(inv_mask_center_small, size=(height, width),
+                                        mode="bilinear", align_corners=False)
         blur_size = max(int(torch.max(w_edge * 4 + 1).item()), 3)
+        blur_size = min(blur_size, 81)
         if blur_size % 2 == 0:
             blur_size += 1
-        blur_small = max(((blur_size + MASK_SCALE - 1) // MASK_SCALE) | 1, 3)
-        if blur_small % 2 == 0:
-            blur_small += 1
-        sigma_s = max(0.3 * ((blur_small - 1) * 0.5 - 1) + 0.8, 0.1)
-        inv_soft_mask_small = kornia.filters.gaussian_blur2d(
-            inv_mask_center_small, (blur_small, blur_small), (sigma_s, sigma_s)
+        sigma = 0.3 * ((blur_size - 1) * 0.5 - 1) + 0.8
+        inv_soft_mask = kornia.filters.gaussian_blur2d(
+            inv_mask_center, (blur_size, blur_size), (sigma, sigma)
         )
-        # 上采样回全分辨率（bilinear 保持边缘平滑）
-        inv_soft_mask = F.interpolate(inv_soft_mask_small.to(dtype=self.dtype),
-                                      size=(height, width), mode="bilinear", align_corners=False)
 
         # 颜色校正：将生成脸的色调统计对齐到原始帧（均值+方差匹配）
         mask_for_color = (inv_mask_erosion_t > 0.5).to(dtype=self.dtype)
@@ -482,7 +479,7 @@ class LstmSync:
         self.runtime = runtime
         self.face_size = get_model_face_size(self.human_path)
         self.wav2lip_batch_size = batch_size
-        self.syncnet_T = 64  # 扩大LSTM状态窗口，减少帧间断裂感
+        self.syncnet_T = 32
         self.audio_type = "hubert"
         self.sync_offset = sync_offset
         self.scale_h = scale_h
@@ -914,9 +911,6 @@ class LstmSync:
         stats["prepare_reference_seconds"] = round(time.perf_counter() - face_prep_start, 4)
 
         # 时序平滑缓冲：用最近N帧的加权平均消除嘴部抖动
-        _SMOOTH_WINDOW = 3
-        _smooth_weights = np.array([0.25, 0.35, 0.40], dtype=np.float32)  # 越新权重越大
-        smooth_buf: collections.deque = collections.deque(maxlen=_SMOOTH_WINDOW)
         sequence_offset = 0
         hn = None
         cn = None
@@ -983,19 +977,7 @@ class LstmSync:
                     pred_batch = torch.from_numpy(prediction)
                     resized_batch = resize_tensor_batch(pred_batch, size=(target_h, target_w))
 
-                smoothed_frames = []
-                for resized in resized_batch:
-                    smooth_buf.append(resized.float())
-                    n = len(smooth_buf)
-                    if n == 1:
-                        smoothed = smooth_buf[0]
-                    else:
-                        w = torch.from_numpy(_smooth_weights[-n:]).to(
-                            device=smooth_buf[0].device, dtype=smooth_buf[0].dtype
-                        )
-                        w = w / w.sum()
-                        smoothed = sum(w[i] * smooth_buf[i] for i in range(n))
-                    smoothed_frames.append(smoothed)
+                smoothed_frames = list(resized_batch)
 
                 merged_batch = self.detect_face.restorer.restore_batch(
                     input_imgs=np.stack(frames, axis=0),
