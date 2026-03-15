@@ -739,8 +739,9 @@ class LstmSync:
             if pipe.stdin:
                 pipe.stdin.close()
             self._report("compositing", 92, "等待编码完成...")
-            pipe.wait()
-            stderr_output = pipe.stderr.read().decode() if pipe.stderr else ""
+            # 修复：用 communicate() 同时消费 stderr，避免 PIPE 缓冲区满导致死锁
+            _, stderr_bytes = pipe.communicate()
+            stderr_output = stderr_bytes.decode(errors="replace") if stderr_bytes else ""
             if pipe.returncode != 0:
                 logger.error("FFmpeg pipe failed (rc=%d): %s", pipe.returncode, stderr_output)
                 raise RuntimeError(f"FFmpeg encoding failed: {stderr_output[-500:]}")
