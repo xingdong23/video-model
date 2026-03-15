@@ -52,7 +52,7 @@ class DigitalHumanGenerateRequest(BaseModel):
     face: Optional[str] = None
     video_file_id: Optional[str] = None
     audio_file_id: str
-    batch_size: int = 4
+    batch_size: int = 16
     sync_offset: int = 0
     scale_h: float = 1.6
     scale_w: float = 3.6
@@ -169,7 +169,7 @@ class AudioSourceConfig(BaseModel):
 class DigitalHumanConfig(BaseModel):
     face: Optional[str] = None
     video_file_id: Optional[str] = None
-    batch_size: int = 4
+    batch_size: int = 16
     sync_offset: int = 0
     scale_h: float = 1.6
     scale_w: float = 3.6

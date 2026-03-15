@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import collections
 import gc
 import logging
 import os
@@ -116,14 +117,37 @@ class AlignRestore:
         self.device = device
         self.dtype = dtype
         self.fill_value = torch.tensor([127, 127, 127], device=device, dtype=dtype)
-        # Lower-face gradient mask: preserves original eyes/forehead, only replaces mouth/jaw
+        # Dynamic anatomical mask: elliptical soft mask positioned on mouth/chin region.
+        # Face template: left_eye=(17,20)*r, right_eye=(58,20)*r, nose=(37.5,40)*r
+        # face_size = (75*r, 100*r) → nose is at (50%, 40%) of face height.
+        # Mouth is estimated at (50%, ~62%) based on standard face proportions.
         h, w = self.face_size[1], self.face_size[0]
-        mask = torch.ones((1, 1, h, w), device=device, dtype=dtype)
-        # Top 40% fades from 0→1, bottom 60% stays at 1
-        fade_end = int(h * 0.45)
-        for y in range(fade_end):
-            mask[:, :, y, :] = y / fade_end
-        self.mask = mask
+
+        # Vertical component: smoothstep 0→1 from just below nose (44%) to mouth top (55%)
+        blend_y0 = int(h * 0.44)
+        blend_y1 = int(h * 0.55)
+        vy = np.zeros(h, dtype=np.float32)
+        for y in range(h):
+            if y >= blend_y1:
+                vy[y] = 1.0
+            elif y > blend_y0:
+                t = (y - blend_y0) / max(blend_y1 - blend_y0, 1)
+                vy[y] = t * t * (3.0 - 2.0 * t)  # smoothstep: zero derivative at endpoints
+
+        # Horizontal component: Gaussian centered on face, sigma≈0.26w
+        # At ±1σ (~mouth corners) value ≈ 0.61, at ±2σ (cheeks) value ≈ 0.14
+        cx = (w - 1) / 2.0
+        sigma_x = w * 0.26
+        hx = np.exp(-0.5 * ((np.arange(w, dtype=np.float32) - cx) / sigma_x) ** 2)
+
+        mask_np = (vy[:, None] * hx[None, :]).astype(np.float32)
+
+        # Light Gaussian blur for ultra-smooth blend boundary
+        ksize = max(int(min(h, w) * 0.08) | 1, 3)
+        mask_np = cv2.GaussianBlur(mask_np, (ksize, ksize), 0)
+        mask_np = np.clip(mask_np, 0.0, 1.0)
+
+        self.mask = torch.from_numpy(mask_np[None, None]).to(device=device, dtype=dtype)
 
     def align_warp_face(self, img: np.ndarray, landmarks3: np.ndarray, smooth: bool = True):
         affine_matrix, self.p_bias = self.transformation_from_points(
@@ -163,7 +187,12 @@ class AlignRestore:
         inv_face = inv_face.clamp(0, 1) * 255
 
         input_tensor = rearrange(torch.from_numpy(input_img).to(device=self.device, dtype=self.dtype), "h w c -> c h w")
-        inv_mask = kornia.geometry.transform.warp_affine(self.mask, inverse_affine, (height, width), padding_mode="zeros")
+
+        # 动态软遮罩：将椭圆 mask 通过逆仿射变换映射回原始帧坐标
+        inv_mask = kornia.geometry.transform.warp_affine(
+            self.mask, inverse_affine, (height, width), padding_mode="zeros"
+        )
+        # 用椭圆核 erosion，比矩形核更贴合嘴部形状
         inv_mask_erosion = kornia.morphology.erosion(
             inv_mask,
             torch.ones((2 * self.upscale_factor, 2 * self.upscale_factor), device=self.device, dtype=self.dtype),
@@ -175,10 +204,12 @@ class AlignRestore:
         erosion_radius = w_edge * 2
 
         inv_mask_erosion_cpu = inv_mask_erosion.squeeze().cpu().numpy().astype(np.float32)
-        inv_mask_center = cv2.erode(
-            inv_mask_erosion_cpu,
-            np.ones((max(int(erosion_radius * scale_h), 1), max(int(erosion_radius * scale_w), 1)), np.uint8),
+        # 椭圆核 erode，比矩形更自然，不产生方角
+        ellipse_kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE,
+            (max(int(erosion_radius * scale_w), 1), max(int(erosion_radius * scale_h), 1)),
         )
+        inv_mask_center = cv2.erode(inv_mask_erosion_cpu, ellipse_kernel)
         inv_mask_center_tensor = torch.from_numpy(inv_mask_center).to(device=self.device, dtype=self.dtype)[None, None, ...]
 
         # Color correction: match generated face color to original in the overlap region
@@ -367,7 +398,7 @@ class LstmSync:
         self.runtime = runtime
         self.face_size = get_model_face_size(self.human_path)
         self.wav2lip_batch_size = batch_size
-        self.syncnet_T = 32
+        self.syncnet_T = 64  # 扩大LSTM状态窗口，减少帧间断裂感
         self.audio_type = "hubert"
         self.sync_offset = sync_offset
         self.scale_h = scale_h
@@ -409,13 +440,37 @@ class LstmSync:
         if self._onnx_session is None:
             sess_options = ort.SessionOptions()
             sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-            sess_options.intra_op_num_threads = 4
+            sess_options.intra_op_num_threads = 8  # L20: 8 vCPU
             sess_options.enable_mem_pattern = True
             sess_options.enable_mem_reuse = True
+
+            providers = list(self.runtime.onnx_providers)
+            provider_options = []
+            for p in providers:
+                if p == "TensorrtExecutionProvider":
+                    trt_cache = Path(self.checkpoints_dir) / "trt_cache"
+                    trt_cache.mkdir(exist_ok=True)
+                    provider_options.append({
+                        "trt_engine_cache_enable": True,
+                        "trt_engine_cache_path": str(trt_cache),
+                        "trt_fp16_enable": True,       # L20 FP16 加速
+                        "trt_max_workspace_size": str(4 * 1024 * 1024 * 1024),  # 4GB workspace
+                    })
+                elif p == "CUDAExecutionProvider":
+                    provider_options.append({
+                        "cudnn_conv_algo_search": "EXHAUSTIVE",
+                        "do_copy_in_default_stream": True,
+                    })
+                else:
+                    provider_options.append({})
+
             self._onnx_session = ort.InferenceSession(
-                str(self.human_path), sess_options, providers=list(self.runtime.onnx_providers)
+                str(self.human_path), sess_options,
+                providers=providers,
+                provider_options=provider_options,
             )
-            logger.info("ONNX session created with graph optimization and memory reuse")
+            applied = self._onnx_session.get_providers()
+            logger.info("ONNX session created | providers: %s", applied)
         return self._onnx_session
 
     def _get_hubert(self) -> tuple[Wav2Vec2FeatureExtractor, HubertModel]:
@@ -599,6 +654,11 @@ class LstmSync:
         total_batches = int(np.ceil(float(len(full_frames)) / self.wav2lip_batch_size))
         use_cpu_resize = self.runtime.resolved != "cuda"
 
+        # 时序平滑缓冲：用最近N帧的加权平均消除嘴部抖动
+        _SMOOTH_WINDOW = 3
+        _smooth_weights = np.array([0.25, 0.35, 0.40], dtype=np.float32)  # 越新权重越大
+        smooth_buf: collections.deque = collections.deque(maxlen=_SMOOTH_WINDOW)
+
         # Optimization: Use FFmpeg pipe instead of cv2.VideoWriter to encode directly to H.264
         use_nvenc = self.runtime.resolved == "cuda" and self._check_nvenc_available()
         ffmpeg_cmd = self._build_ffmpeg_pipe_cmd(frame_width, frame_height, int(fps), temp_audio_path, final_video_path, use_nvenc=use_nvenc)
@@ -653,7 +713,18 @@ class LstmSync:
                             torch.from_numpy(pred).to(self.device),
                             size=(target_h, target_w),
                         )
-                    merged = self.detect_face.restorer.restore_img(frame, resized, affine, scale_h=self.scale_h, scale_w=self.scale_w)
+
+                    # 时序平滑：对生成的嘴部区域在时间轴上做加权平均，消除帧间抖动
+                    smooth_buf.append(resized.float())
+                    n = len(smooth_buf)
+                    if n == 1:
+                        smoothed = smooth_buf[0]
+                    else:
+                        w = torch.from_numpy(_smooth_weights[-n:]).float()
+                        w = w / w.sum()
+                        smoothed = sum(w[i] * smooth_buf[i] for i in range(n))
+
+                    merged = self.detect_face.restorer.restore_img(frame, smoothed, affine, scale_h=self.scale_h, scale_w=self.scale_w)
                     pipe.stdin.write(merged.tobytes())
 
                 if (batch_index + 1) % 50 == 0:

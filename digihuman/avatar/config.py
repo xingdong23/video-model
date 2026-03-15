@@ -41,11 +41,25 @@ class RuntimeSelection:
 
 def resolve_runtime(runtime: str = "auto") -> RuntimeSelection:
     normalized = runtime.lower().strip()
-    if normalized not in {"auto", "cuda", "cpu"}:
-        raise ValueError("runtime must be one of: auto, cuda, cpu")
+    if normalized not in {"auto", "cuda", "cpu", "tensorrt"}:
+        raise ValueError("runtime must be one of: auto, cuda, cpu, tensorrt")
 
     available_providers = set(ort.get_available_providers())
     cuda_ready = torch.cuda.is_available() and "CUDAExecutionProvider" in available_providers
+    trt_ready = cuda_ready and "TensorrtExecutionProvider" in available_providers
+
+    if normalized == "tensorrt":
+        if not trt_ready:
+            raise RuntimeError(
+                "TensorRT runtime requested, but TensorrtExecutionProvider is unavailable."
+            )
+        return RuntimeSelection(
+            requested=normalized,
+            resolved="cuda",
+            torch_device="cuda",
+            onnx_providers=("TensorrtExecutionProvider", "CUDAExecutionProvider", "CPUExecutionProvider"),
+            description="NVIDIA TensorRT path",
+        )
 
     if normalized == "cuda":
         if not cuda_ready:
@@ -67,6 +81,16 @@ def resolve_runtime(runtime: str = "auto") -> RuntimeSelection:
             torch_device="cpu",
             onnx_providers=("CPUExecutionProvider",),
             description=f"CPU experimental path on {platform.system()} {platform.machine()}",
+        )
+
+    # auto: 优先 TensorRT > CUDA > CPU
+    if trt_ready:
+        return RuntimeSelection(
+            requested=normalized,
+            resolved="cuda",
+            torch_device="cuda",
+            onnx_providers=("TensorrtExecutionProvider", "CUDAExecutionProvider", "CPUExecutionProvider"),
+            description="Auto-selected NVIDIA TensorRT path",
         )
 
     if cuda_ready:

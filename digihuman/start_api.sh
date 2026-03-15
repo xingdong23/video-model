@@ -6,13 +6,18 @@
 
 set -e
 
-CONDA_ENV="/home/claude/miniconda3/envs/digihuman"
+CONDA_ENV="/home/claude/miniconda3/envs/myvideo"
 PYTHON="$CONDA_ENV/bin/python"
 FFMPEG="$CONDA_ENV/bin/ffmpeg"
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # GPU device selection (default to GPU 0)
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
+
+# TensorRT engine cache (避免每次重新编译，首次会慢3-5分钟)
+export ORT_TENSORRT_ENGINE_CACHE_ENABLE=1
+export ORT_TENSORRT_CACHE_PATH="$PROJECT_DIR/avatar/models/tuilionnx/checkpoints/trt_cache"
+export ORT_TENSORRT_FP16_ENABLE=1
 
 # Export ffmpeg path for all engines that need it
 export DIGIHUMAN_DIGITAL_HUMAN_FFMPEG_BIN="$FFMPEG"
