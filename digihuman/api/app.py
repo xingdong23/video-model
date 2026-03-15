@@ -23,9 +23,11 @@ def _start_cleanup_timer(interval_seconds: int, ttl_seconds: int):
             time.sleep(interval_seconds)
             try:
                 from .storage import get_storage
-                removed = get_storage().cleanup_expired(ttl_seconds)
+                from .project_store import get_project_store
+                protected = get_project_store().collect_all_referenced_file_ids()
+                removed = get_storage().cleanup_expired(ttl_seconds, protected_ids=protected)
                 if removed:
-                    logger.info("Cleanup: removed %d expired files", removed)
+                    logger.info("Cleanup: removed %d expired files (%d protected)", removed, len(protected))
             except Exception:
                 logger.warning("Cleanup job failed", exc_info=True)
 
@@ -154,12 +156,12 @@ def create_app():
 
     # ── Routers ──
     from .routers import tts, avatar, subtitle, audio_mixer, copywriter, scraper, pipeline, files, tasks, projects
-    app.include_router(tts.router, prefix="/api/v1/tts", tags=["tts"])
-    app.include_router(avatar.router, prefix="/api/v1/avatar", tags=["avatar"])
+    app.include_router(tts.router, prefix="/api/v1/voice", tags=["voice"])
+    app.include_router(avatar.router, prefix="/api/v1/digital-human", tags=["digital-human"])
     app.include_router(subtitle.router, prefix="/api/v1/subtitle", tags=["subtitle"])
-    app.include_router(audio_mixer.router, prefix="/api/v1/audio-mixer", tags=["audio-mixer"])
-    app.include_router(copywriter.router, prefix="/api/v1/copywriter", tags=["copywriter"])
-    app.include_router(scraper.router, prefix="/api/v1/scraper", tags=["scraper"])
+    app.include_router(audio_mixer.router, prefix="/api/v1/bgm", tags=["bgm"])
+    app.include_router(copywriter.router, prefix="/api/v1/rewrite", tags=["rewrite"])
+    app.include_router(scraper.router, prefix="/api/v1/douyin", tags=["douyin"])
     app.include_router(pipeline.router, prefix="/api/v1/pipeline", tags=["pipeline"])
     app.include_router(files.router, prefix="/api/v1/files", tags=["files"])
     app.include_router(tasks.router, prefix="/api/v1/tasks", tags=["tasks"])

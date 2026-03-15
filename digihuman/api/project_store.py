@@ -58,7 +58,11 @@ class ProjectStore:
         with self._lock:
             return self._read(project_id)
 
+    VALID_STEPS = {"douyin", "script", "voice", "digital_human", "subtitle", "bgm"}
+
     def update_step(self, project_id: str, step: str, step_data: dict) -> dict | None:
+        if step not in self.VALID_STEPS:
+            raise ValueError(f"Invalid step name: {step!r}, must be one of {self.VALID_STEPS}")
         with self._lock:
             data = self._read(project_id)
             if data is None:
@@ -98,6 +102,7 @@ class ProjectStore:
                         "steps_done": len(data.get("steps", {})),
                     })
                 except Exception:
+                    logger.debug("Failed to read project file: %s", p, exc_info=True)
                     continue
         projects.sort(key=lambda x: x["updated_at"], reverse=True)
         return projects
@@ -113,9 +118,55 @@ class ProjectStore:
                     if douyin.get("video_file_id") == video_file_id:
                         results.append(data)
                 except Exception:
+                    logger.debug("Failed to read project file: %s", p, exc_info=True)
                     continue
         results.sort(key=lambda x: x.get("updated_at", 0), reverse=True)
         return results
+
+    # Keys in step data that hold file_id references
+    _FILE_ID_KEYS = ("video_file_id", "file_id", "srt_file_id", "burned_file_id", "upload_video_file_id")
+
+    def collect_all_referenced_file_ids(self) -> set[str]:
+        """Return every file_id referenced by any project step."""
+        file_ids: set[str] = set()
+        with self._lock:
+            for p in self.root.glob("*.json"):
+                try:
+                    data = json.loads(p.read_text(encoding="utf-8"))
+                    for step_data in data.get("steps", {}).values():
+                        if not isinstance(step_data, dict):
+                            continue
+                        for key in self._FILE_ID_KEYS:
+                            fid = step_data.get(key)
+                            if fid:
+                                file_ids.add(fid)
+                        # Also collect file_ids from nested files lists (douyin step)
+                        for f in step_data.get("files", []):
+                            if isinstance(f, dict) and f.get("file_id"):
+                                file_ids.add(f["file_id"])
+                except Exception:
+                    logger.debug("Failed to read project file: %s", p, exc_info=True)
+                    continue
+        return file_ids
+
+    def collect_file_ids(self, project_id: str) -> set[str]:
+        """Return all file_ids referenced by a single project."""
+        file_ids: set[str] = set()
+        with self._lock:
+            data = self._read(project_id)
+        if data is None:
+            return file_ids
+        for step_data in data.get("steps", {}).values():
+            if not isinstance(step_data, dict):
+                continue
+            for key in self._FILE_ID_KEYS:
+                fid = step_data.get(key)
+                if fid:
+                    file_ids.add(fid)
+            for f in step_data.get("files", []):
+                if isinstance(f, dict) and f.get("file_id"):
+                    file_ids.add(f["file_id"])
+        return file_ids
 
     def delete(self, project_id: str) -> bool:
         with self._lock:

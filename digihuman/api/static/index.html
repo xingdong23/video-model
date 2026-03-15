@@ -127,7 +127,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft
 <body>
 
 <div class="header">
-  <div class="logo">my-<span>video</span></div>
+  <div class="logo">Digi<span>Human</span></div>
   <span class="badge" id="statusBadge">--</span>
   <span class="gpu-tag" id="gpuInfo">GPU: --</span>
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
@@ -444,6 +444,47 @@ function hideRes(id) { const el = $(id); if (el) { el.className = 'result'; el.t
 function markDone(n) { $('sn' + n).classList.add('done'); }
 function markUndone(n) { $('sn' + n).classList.remove('done'); }
 
+/**
+ * When a step is re-done, clear all downstream step state and UI.
+ * Step dependency chain: 1→2→3→4→5→6
+ */
+const _stepDownstream = {
+  1: { state: ['scriptText','douyinVideoFileId','audioFileId','videoFileId','uploadVideoFileId','srtFileId','burnedVideoFileId','finalVideoFileId'],
+       ui: ['dy-res','tts-res','dh-res','sub-res','burn-res','bgm-res','rewrite-res'],
+       previews: ['dy-preview','tts-preview','dh-preview','burn-preview','bgm-preview'],
+       steps: [2,3,4,5,6] },
+  2: { state: ['audioFileId','videoFileId','uploadVideoFileId','srtFileId','burnedVideoFileId','finalVideoFileId'],
+       ui: ['tts-res','dh-res','sub-res','burn-res','bgm-res'],
+       previews: ['tts-preview','dh-preview','burn-preview','bgm-preview'],
+       steps: [3,4,5,6] },
+  3: { state: ['videoFileId','uploadVideoFileId','srtFileId','burnedVideoFileId','finalVideoFileId'],
+       ui: ['dh-res','sub-res','burn-res','bgm-res'],
+       previews: ['dh-preview','burn-preview','bgm-preview'],
+       steps: [4,5,6] },
+  4: { state: ['srtFileId','burnedVideoFileId','finalVideoFileId'],
+       ui: ['sub-res','burn-res','bgm-res'],
+       previews: ['burn-preview','bgm-preview'],
+       steps: [5,6] },
+  5: { state: ['finalVideoFileId'],
+       ui: ['bgm-res'],
+       previews: ['bgm-preview'],
+       steps: [6] },
+};
+
+function invalidateDownstream(fromStep) {
+  const ds = _stepDownstream[fromStep];
+  if (!ds) return;
+  ds.state.forEach(k => { state[k] = _defaultState[k]; });
+  ds.ui.forEach(hideRes);
+  ds.previews.forEach(id => { $(id).innerHTML = ''; });
+  ds.steps.forEach(markUndone);
+  if (fromStep <= 4) {
+    $('sub-divider').style.display = 'none';
+    $('btn-burn').style.display = 'none';
+  }
+  saveState();
+}
+
 function resetUI() {
   // Clear all step outputs and previews
   ['dy-res','tts-res','dh-res','sub-res','burn-res','bgm-res','rewrite-res'].forEach(hideRes);
@@ -649,10 +690,23 @@ async function ensureProject() {
 async function restoreState() {
   // Load project list and existing videos in parallel
   await Promise.all([loadProjectList(), loadExistingVideos()]);
-  // If we had a project selected, restore UI from local state
-  if (state.projectId && (state.scriptText || state.audioFileId || state.videoFileId)) {
-    applyStateToUI();
-    log('已恢复项目状态');
+  // If we had a project selected, fetch latest data from server
+  if (state.projectId) {
+    try {
+      const r = await api('GET', '/api/v1/projects/' + state.projectId);
+      if (r.success) {
+        restoreProjectData(r.data);
+        log('已从服务端恢复项目状态');
+        return;
+      }
+    } catch (e) {
+      console.warn('Failed to restore from server, using local state:', e);
+    }
+    // Fallback: server unreachable or project deleted, use local state
+    if (state.scriptText || state.audioFileId || state.videoFileId) {
+      applyStateToUI();
+      log('已从本地恢复项目状态');
+    }
   }
 }
 
@@ -815,6 +869,7 @@ async function douyinExtract() {
     const taskId = r.data.task_id;
     const result = await pollTask(taskId, 'dy', '文案提取');
 
+    invalidateDownstream(1);
     showRes('dy-res', result);
     const stepData = { transcript: '', files: [] };
     if (result.transcript) {
@@ -928,6 +983,7 @@ async function douyinTranscribeExisting() {
     const taskId = r.data.task_id;
     const result = await pollTask(taskId, 'dy', '文案提取');
 
+    invalidateDownstream(1);
     showRes('dy-res', result);
     const stepData = { transcript: '', files: [] };
     if (result.transcript) {
@@ -961,6 +1017,7 @@ async function rewriteScript() {
   if (!text) { showRes('rewrite-res', '请先输入文案内容', true); return; }
 
   if (mode === 'none') {
+    invalidateDownstream(2);
     state.scriptText = text;
     saveState();
     saveStep('script', { text });
@@ -982,6 +1039,7 @@ async function rewriteScript() {
       r = await api('POST', '/api/v1/rewrite/instruction', { text, instruction });
     }
     if (r.success) {
+      invalidateDownstream(2);
       const newText = r.data.rewritten_text || '';
       $('script-text').value = newText;
       state.scriptText = newText;
@@ -1027,6 +1085,7 @@ async function generateAudio() {
     const taskId = r.data.task_id;
     const result = await pollTask(taskId, 'tts', '音频生成');
 
+    invalidateDownstream(3);
     state.audioFileId = result.file_id;
     saveState();
     saveStep('voice', { file_id: result.file_id });
@@ -1098,6 +1157,7 @@ async function generateVideo() {
     const taskId = r.data.task_id;
     const result = await pollTask(taskId, 'dh', '数字人视频');
 
+    invalidateDownstream(4);
     state.videoFileId = result.file_id;
     state.finalVideoFileId = result.file_id;
     saveState();
@@ -1128,6 +1188,7 @@ async function generateSubtitle() {
     const taskId = r.data.task_id;
     const result = await pollTask(taskId, 'sub', '字幕生成');
 
+    invalidateDownstream(5);
     state.srtFileId = result.file_id;
     saveState();
     saveStep('subtitle', { srt_file_id: result.file_id, burned_file_id: null });

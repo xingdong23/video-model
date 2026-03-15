@@ -35,8 +35,11 @@ class StorageBackend(ABC):
         """Delete a file by file_id."""
 
     @abstractmethod
-    def cleanup_expired(self, max_age_seconds: int) -> int:
-        """Delete files older than max_age_seconds, return count deleted."""
+    def cleanup_expired(self, max_age_seconds: int, protected_ids: set[str] | None = None) -> int:
+        """Delete files older than max_age_seconds, return count deleted.
+
+        Files whose file_id is in *protected_ids* are skipped (e.g. referenced by a project).
+        """
 
 
 class LocalStorage(StorageBackend):
@@ -49,10 +52,16 @@ class LocalStorage(StorageBackend):
         self._lock = threading.Lock()
         self._rebuild_index()
 
+    # Directories that store non-manifest JSON and must be excluded from the file index
+    _EXCLUDED_DIRS = {"projects"}
+
     def _rebuild_index(self):
         """Scan disk once at startup to build the in-memory file_id -> manifest_path index."""
         count = 0
         for manifest_path in self.root.rglob("*.json"):
+            relative = manifest_path.relative_to(self.root)
+            if relative.parts[0] in self._EXCLUDED_DIRS:
+                continue
             file_id = manifest_path.stem
             self._index[file_id] = manifest_path
             count += 1
@@ -124,12 +133,15 @@ class LocalStorage(StorageBackend):
         with self._lock:
             self._index.pop(file_id, None)
 
-    def cleanup_expired(self, max_age_seconds: int) -> int:
+    def cleanup_expired(self, max_age_seconds: int, protected_ids: set[str] | None = None) -> int:
         now = time.time()
+        protected = protected_ids or set()
         count = 0
         with self._lock:
             expired_ids = []
             for file_id, manifest_path in self._index.items():
+                if file_id in protected:
+                    continue
                 try:
                     manifest = json.loads(manifest_path.read_text())
                     if now - manifest.get("created_at", now) > max_age_seconds:
@@ -139,6 +151,7 @@ class LocalStorage(StorageBackend):
                         expired_ids.append(file_id)
                         count += 1
                 except Exception:
+                    logger.debug("Cleanup: failed to process %s", file_id, exc_info=True)
                     continue
             for fid in expired_ids:
                 self._index.pop(fid, None)
@@ -155,6 +168,7 @@ class LocalStorage(StorageBackend):
             try:
                 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             except Exception:
+                logger.debug("list_category: failed to read manifest %s", file_id, exc_info=True)
                 continue
             if manifest.get("category") != category:
                 continue
@@ -173,6 +187,7 @@ class LocalStorage(StorageBackend):
             try:
                 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             except Exception:
+                logger.debug("find_by_tag: failed to read manifest %s", file_id, exc_info=True)
                 continue
             if manifest.get("category") != category:
                 continue

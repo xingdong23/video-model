@@ -247,9 +247,9 @@ async def handle_callback(payload: dict):
 
 ---
 
-## Avatar (数字人)
+## Digital Human (数字人)
 
-### GET /api/v1/avatar/faces
+### GET /api/v1/digital-human/faces
 
 列出可用的人脸预设视频。**同步**。
 
@@ -262,7 +262,7 @@ async def handle_callback(payload: dict):
 }
 ```
 
-### POST /api/v1/avatar/generate
+### POST /api/v1/digital-human/generate
 
 生成数字人视频。**异步 (GPU)**，返回 `202`。
 
@@ -316,9 +316,9 @@ async def handle_callback(payload: dict):
 
 ---
 
-## TTS (语音)
+## Voice (语音)
 
-### GET /api/v1/tts/speakers
+### GET /api/v1/voice/speakers
 
 列出可用的说话人。**同步**。
 
@@ -334,7 +334,7 @@ async def handle_callback(payload: dict):
 }
 ```
 
-### POST /api/v1/tts/synthesize
+### POST /api/v1/voice/synthesize
 
 文本转语音。**异步 (GPU)**，返回 `202`。
 
@@ -356,13 +356,13 @@ async def handle_callback(payload: dict):
 }
 ```
 
-### POST /api/v1/tts/synthesize/stream
+### POST /api/v1/voice/synthesize/stream
 
 流式语音合成，直接返回 WAV 音频流。**同步**。
 
 请求体同 `/synthesize`。响应 `Content-Type: audio/wav`。
 
-### POST /api/v1/tts/zero-shot
+### POST /api/v1/voice/zero-shot
 
 零样本语音克隆。**异步 (GPU)**，返回 `202`。
 
@@ -385,7 +385,7 @@ async def handle_callback(payload: dict):
 }
 ```
 
-### POST /api/v1/tts/voices/export
+### POST /api/v1/voice/voices/export
 
 导出自定义音色。**同步**。
 
@@ -482,9 +482,9 @@ LLM 纠错已有字幕。**同步**（调用外部 LLM API）。
 
 ---
 
-## Audio Mixer (背景音乐)
+## BGM (背景音乐)
 
-### GET /api/v1/audio-mixer/tracks
+### GET /api/v1/bgm/tracks
 
 列出 BGM 素材库。**同步**。
 
@@ -499,7 +499,7 @@ LLM 纠错已有字幕。**同步**（调用外部 LLM API）。
 }
 ```
 
-### POST /api/v1/audio-mixer/mix
+### POST /api/v1/bgm/mix
 
 混合背景音乐到视频。**异步 (CPU)**，返回 `202`。
 
@@ -530,9 +530,9 @@ LLM 纠错已有字幕。**同步**（调用外部 LLM API）。
 
 ---
 
-## Copywriter (文案改写)
+## Rewrite (文案改写)
 
-### POST /api/v1/copywriter/auto
+### POST /api/v1/rewrite/auto
 
 自动改写文案。**同步**。
 
@@ -542,7 +542,7 @@ LLM 纠错已有字幕。**同步**（调用外部 LLM API）。
 
 **响应**：`{ "rewritten_text": "..." }`
 
-### POST /api/v1/copywriter/instruction
+### POST /api/v1/rewrite/instruction
 
 按指令改写。**同步**。
 
@@ -553,9 +553,9 @@ LLM 纠错已有字幕。**同步**（调用外部 LLM API）。
 
 ---
 
-## Scraper (视频采集)
+## Douyin (视频采集)
 
-### POST /api/v1/scraper/transcribe
+### POST /api/v1/douyin/transcribe
 
 下载抖音视频并转录文案。**异步 (CPU)**，返回 `202`。
 
@@ -575,7 +575,7 @@ LLM 纠错已有字幕。**同步**（调用外部 LLM API）。
 }
 ```
 
-### POST /api/v1/scraper/download
+### POST /api/v1/douyin/download
 
 仅下载抖音视频（不转录）。**异步 (CPU)**，返回 `202`。
 
@@ -772,9 +772,9 @@ LLM 纠错已有字幕。**同步**（调用外部 LLM API）。
 
 | 队列 | 并发 | 包含接口 |
 |------|------|----------|
-| GPU | 串行 (1 worker) | avatar/generate, tts/synthesize, tts/zero-shot, subtitle/generate-srt |
-| CPU | 2 并发 workers | subtitle/burn, audio-mixer/mix, scraper/transcribe, scraper/download |
-| 同步 (无队列) | 不限 | tts/speakers, tts/synthesize/stream, tts/voices/export, avatar/faces, subtitle/correct, audio-mixer/tracks, copywriter/*, files/*, pipeline/run |
+| GPU | 串行 (1 worker) | digital-human/generate, voice/synthesize, voice/zero-shot, subtitle/generate-srt |
+| CPU | 2 并发 workers | subtitle/burn, bgm/mix, douyin/transcribe, douyin/download |
+| 同步 (无队列) | 不限 | voice/speakers, voice/synthesize/stream, voice/voices/export, digital-human/faces, subtitle/correct, bgm/tracks, rewrite/*, files/*, pipeline/run |
 
 ---
 
@@ -796,7 +796,7 @@ with open("audio.wav", "rb") as f:
 audio_file_id = r.json()["data"]["file_id"]
 
 # 2. 提交数字人生成，带 callback_url
-r = httpx.post(f"{GPU_API}/api/v1/avatar/generate", json={
+r = httpx.post(f"{GPU_API}/api/v1/digital-human/generate", json={
     "audio_file_id": audio_file_id,
     "face": "anchor1.mp4",
     "callback_url": "http://localhost:3000/webhook/digihuman",
