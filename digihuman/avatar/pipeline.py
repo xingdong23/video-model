@@ -663,7 +663,8 @@ class LstmSync:
         use_nvenc = self.runtime.resolved == "cuda" and self._check_nvenc_available()
         ffmpeg_cmd = self._build_ffmpeg_pipe_cmd(frame_width, frame_height, int(fps), temp_audio_path, final_video_path, use_nvenc=use_nvenc)
         logger.info("Starting FFmpeg pipe: %s", " ".join(ffmpeg_cmd))
-        pipe = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        # stdout=DEVNULL 避免 FFmpeg stdout 缓冲区满导致 pipe deadlock
+        pipe = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
         try:
             for batch_index, (img_batch, mel_batch, frames, coords, affines) in enumerate(
