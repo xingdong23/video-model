@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,6 +26,7 @@ class GenerationResult:
     elapsed_seconds: float
     runtime: str
     runtime_description: str
+    diagnostics: dict[str, float]
 
 
 logger = logging.getLogger(__name__)
@@ -41,6 +43,8 @@ class DigitalHumanEngine:
         self._tuilionnx_dir = tuilionnx_dir
         self._ffmpeg_bin = ffmpeg_bin
         self._runtime = runtime
+        self._runner_cache = {}
+        self._runner_lock = threading.Lock()
         self.paths.output_dir.mkdir(parents=True, exist_ok=True)
         self.paths.local_faces_dir.mkdir(parents=True, exist_ok=True)
 
@@ -91,13 +95,66 @@ class DigitalHumanEngine:
             f"Face preset not found: {face}. Checked {self.paths.local_faces_dir}."
         )
 
+    def _get_runner(
+        self,
+        *,
+        human_path: Path,
+        hubert_path: Path,
+        runtime_selection: RuntimeSelection,
+    ):
+        from .pipeline import LstmSync
+
+        cache_key = (
+            str(human_path),
+            str(hubert_path),
+            runtime_selection.requested,
+            runtime_selection.resolved,
+            runtime_selection.onnx_providers,
+            self.ffmpeg_bin,
+        )
+        with self._runner_lock:
+            runner = self._runner_cache.get(cache_key)
+            if runner is None:
+                runner = LstmSync(
+                    human_path=human_path,
+                    hubert_path=hubert_path,
+                    checkpoints_dir=self.checkpoints_dir,
+                    runtime=runtime_selection,
+                    ffmpeg_bin=self.ffmpeg_bin,
+                )
+                self._runner_cache[cache_key] = runner
+                logger.info("Created digital human runner cache entry for %s", human_path.name)
+            return runner
+
+    def prepare_runtime(
+        self,
+        *,
+        beautify_teeth: bool = False,
+        runtime: str | None = None,
+    ) -> RuntimeSelection:
+        runtime_selection = resolve_runtime(runtime or self._runtime)
+        human_path = self.checkpoints_dir / ("256.onnx" if beautify_teeth else "256_m.onnx")
+        hubert_path = self.checkpoints_dir / "chinese-hubert-large"
+        if not human_path.exists():
+            raise FileNotFoundError(f"Human model not found: {human_path}")
+        if not hubert_path.exists():
+            raise FileNotFoundError(f"HuBERT model directory not found: {hubert_path}")
+        runner = self._get_runner(
+            human_path=human_path,
+            hubert_path=hubert_path,
+            runtime_selection=runtime_selection,
+        )
+        runner.preload_models()
+        logger.info("Digital human runtime prepared: %s", runtime_selection.description)
+        return runtime_selection
+
     def generate(
         self,
         audio: str | os.PathLike,
         face: str | None = None,
         video: str | os.PathLike | None = None,
         output_path: str | os.PathLike | None = None,
-        batch_size: int = 16,
+        batch_size: int = 4,
         sync_offset: int = 0,
         scale_h: float = 1.6,
         scale_w: float = 3.6,
@@ -113,8 +170,6 @@ class DigitalHumanEngine:
         reference_video = self.resolve_reference_video(face=face, video=video)
         output = Path(output_path).expanduser().resolve() if output_path else self.paths.output_dir / "output.mp4"
         output.parent.mkdir(parents=True, exist_ok=True)
-
-        from .pipeline import LstmSync
 
         runtime_selection = resolve_runtime(runtime or self._runtime)
         human_path = self.checkpoints_dir / ("256.onnx" if beautify_teeth else "256_m.onnx")
@@ -132,17 +187,17 @@ class DigitalHumanEngine:
         audio_temp_path = temp_dir / f"temp_{timestamp}.wav"
 
         start = time.perf_counter()
-        lstm_sync = LstmSync(
+        lstm_sync = self._get_runner(
             human_path=human_path,
             hubert_path=hubert_path,
-            checkpoints_dir=self.checkpoints_dir,
+            runtime_selection=runtime_selection,
+        )
+        lstm_sync.configure_request(
             batch_size=batch_size,
             sync_offset=sync_offset,
             scale_h=scale_h,
             scale_w=scale_w,
             compress_inference_check_box=compress_inference,
-            ffmpeg_bin=self.ffmpeg_bin,
-            runtime=runtime_selection,
             progress_callback=progress_callback,
         )
         try:
@@ -170,4 +225,5 @@ class DigitalHumanEngine:
             elapsed_seconds=elapsed,
             runtime=runtime_selection.resolved,
             runtime_description=runtime_selection.description,
+            diagnostics=dict(getattr(lstm_sync, "last_run_stats", {})),
         )

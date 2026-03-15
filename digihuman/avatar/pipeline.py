@@ -6,6 +6,8 @@ import logging
 import os
 import re
 import subprocess
+import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Union
 
@@ -62,6 +64,14 @@ LMK_ADAPT_ORIGIN_ORDER = [
 INSIGHTFACE_DETECT_SIZE = 512
 
 
+@dataclass
+class CachedReferenceFrame:
+    face_rgb: np.ndarray
+    coords: list[int]
+    affine_matrix: np.ndarray
+    packed_face: np.ndarray | None = None
+
+
 def get_video_fps(video_path: str | os.PathLike) -> int:
     cap = cv2.VideoCapture(str(video_path))
     fps = cap.get(cv2.CAP_PROP_FPS)
@@ -101,6 +111,19 @@ def resize_tensor_image(image: Tensor, size: tuple[int, int]) -> Tensor:
         antialias=True,
     )
     return resized.squeeze(0)
+
+
+def resize_tensor_batch(images: Tensor, size: tuple[int, int]) -> Tensor:
+    tensor = images
+    if not torch.is_floating_point(tensor):
+        tensor = tensor.to(dtype=torch.float32)
+    return F.interpolate(
+        tensor,
+        size=size,
+        mode="bicubic",
+        align_corners=False,
+        antialias=True,
+    )
 
 
 class AlignRestore:
@@ -148,6 +171,7 @@ class AlignRestore:
         mask_np = np.clip(mask_np, 0.0, 1.0)
 
         self.mask = torch.from_numpy(mask_np[None, None]).to(device=device, dtype=dtype)
+        self._ellipse_kernel_cache: dict[tuple[int, int, str, str], Tensor] = {}
 
     def align_warp_face(self, img: np.ndarray, landmarks3: np.ndarray, smooth: bool = True):
         affine_matrix, self.p_bias = self.transformation_from_points(
@@ -167,15 +191,48 @@ class AlignRestore:
         cropped_face = rearrange(cropped_face.squeeze(0), "c h w -> h w c").cpu().numpy().astype(np.uint8)
         return cropped_face, affine_matrix
 
-    def restore_img(self, input_img: np.ndarray, face: Tensor, affine_matrix, scale_h: float = 1.0, scale_w: float = 1.0):
-        height, width, _ = input_img.shape
-        if isinstance(affine_matrix, np.ndarray):
-            affine_tensor = torch.from_numpy(affine_matrix).to(device=self.device, dtype=self.dtype).unsqueeze(0)
+    def _get_ellipse_kernel(self, height: int, width: int) -> Tensor:
+        height = max(int(height), 1)
+        width = max(int(width), 1)
+        cache_key = (height, width, str(self.device), str(self.dtype))
+        cached = self._ellipse_kernel_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        y = torch.linspace(-1.0, 1.0, steps=height, device=self.device, dtype=torch.float32)
+        x = torch.linspace(-1.0, 1.0, steps=width, device=self.device, dtype=torch.float32)
+        yy, xx = torch.meshgrid(y, x, indexing="ij")
+        kernel = ((xx * xx + yy * yy) <= 1.0).to(dtype=self.dtype)
+        if torch.count_nonzero(kernel) == 0:
+            kernel = torch.ones((height, width), device=self.device, dtype=self.dtype)
+        self._ellipse_kernel_cache[cache_key] = kernel
+        return kernel
+
+    def restore_batch(
+        self,
+        input_imgs: np.ndarray | list[np.ndarray],
+        faces: Tensor,
+        affine_matrices,
+        scale_h: float = 1.0,
+        scale_w: float = 1.0,
+    ) -> np.ndarray:
+        input_array = np.asarray(input_imgs)
+        if input_array.ndim == 3:
+            input_array = np.expand_dims(input_array, axis=0)
+        height, width = input_array.shape[1:3]
+
+        if isinstance(affine_matrices, np.ndarray):
+            affine_tensor = torch.from_numpy(affine_matrices).to(device=self.device, dtype=self.dtype)
         else:
-            affine_tensor = affine_matrix.to(device=self.device, dtype=self.dtype)
+            affine_tensor = affine_matrices.to(device=self.device, dtype=self.dtype)
+        if affine_tensor.ndim == 2:
+            affine_tensor = affine_tensor.unsqueeze(0)
+
+        face_tensor = faces.to(device=self.device, dtype=self.dtype)
+        if face_tensor.ndim == 3:
+            face_tensor = face_tensor.unsqueeze(0)
 
         inverse_affine = kornia.geometry.transform.invert_affine_transform(affine_tensor)
-        face_tensor = face.to(dtype=self.dtype).unsqueeze(0)
         inv_face = kornia.geometry.transform.warp_affine(
             face_tensor,
             inverse_affine,
@@ -183,59 +240,71 @@ class AlignRestore:
             mode="bilinear",
             padding_mode="fill",
             fill_value=self.fill_value,
-        ).squeeze(0)
-        inv_face = inv_face.clamp(0, 1) * 255
+        ).clamp(0, 1) * 255
 
-        input_tensor = rearrange(torch.from_numpy(input_img).to(device=self.device, dtype=self.dtype), "h w c -> c h w")
+        input_tensor = torch.from_numpy(input_array).to(device=self.device, dtype=self.dtype)
+        input_tensor = rearrange(input_tensor, "b h w c -> b c h w")
 
-        # 动态软遮罩：将椭圆 mask 通过逆仿射变换映射回原始帧坐标
+        batch_size = input_tensor.shape[0]
+        mask_batch = self.mask.expand(batch_size, -1, -1, -1)
         inv_mask = kornia.geometry.transform.warp_affine(
-            self.mask, inverse_affine, (height, width), padding_mode="zeros"
+            mask_batch,
+            inverse_affine,
+            (height, width),
+            padding_mode="zeros",
         )
-        # 用椭圆核 erosion，比矩形核更贴合嘴部形状
-        inv_mask_erosion = kornia.morphology.erosion(
-            inv_mask,
-            torch.ones((2 * self.upscale_factor, 2 * self.upscale_factor), device=self.device, dtype=self.dtype),
+        base_kernel_size = max(2 * self.upscale_factor, 1)
+        base_kernel = torch.ones((base_kernel_size, base_kernel_size), device=self.device, dtype=self.dtype)
+        inv_mask_erosion = kornia.morphology.erosion(inv_mask, base_kernel)
+        inv_mask_erosion_t = inv_mask_erosion.expand(-1, 3, -1, -1)
+
+        total_face_area = inv_mask_erosion.float().sum(dim=(1, 2, 3))
+        w_edge = torch.clamp((total_face_area.sqrt() / 20.0).to(torch.int64), min=1)
+        erosion_radius = torch.clamp(w_edge * 2, min=1)
+        kernel_h = max(int(torch.max(torch.ceil(erosion_radius.float() * float(scale_h))).item()), 1)
+        kernel_w = max(int(torch.max(torch.ceil(erosion_radius.float() * float(scale_w))).item()), 1)
+        ellipse_kernel = self._get_ellipse_kernel(kernel_h, kernel_w)
+        inv_mask_center = kornia.morphology.erosion(inv_mask_erosion, ellipse_kernel)
+
+        mask_for_color = (inv_mask_erosion_t > 0.5).to(dtype=self.dtype)
+        mask_counts = mask_for_color.sum(dim=(2, 3)).clamp(min=1.0)
+        valid_channels = mask_counts > 100.0
+        gen_mean = (inv_face * mask_for_color).sum(dim=(2, 3)) / mask_counts
+        orig_mean = (input_tensor * mask_for_color).sum(dim=(2, 3)) / mask_counts
+        gen_var = (((inv_face - gen_mean[..., None, None]) ** 2) * mask_for_color).sum(dim=(2, 3)) / mask_counts
+        orig_var = (((input_tensor - orig_mean[..., None, None]) ** 2) * mask_for_color).sum(dim=(2, 3)) / mask_counts
+        gen_std = gen_var.sqrt().clamp(min=1.0)
+        orig_std = orig_var.sqrt().clamp(min=1.0)
+        adjusted_face = (
+            (inv_face - gen_mean[..., None, None]) * (orig_std / gen_std)[..., None, None]
+            + orig_mean[..., None, None]
         )
-
-        inv_mask_erosion_t = inv_mask_erosion.squeeze(0).expand_as(inv_face)
-        total_face_area = torch.sum(inv_mask_erosion.float())
-        w_edge = int(total_face_area ** 0.5) // 20
-        erosion_radius = w_edge * 2
-
-        inv_mask_erosion_cpu = inv_mask_erosion.squeeze().cpu().numpy().astype(np.float32)
-        # 椭圆核 erode，比矩形更自然，不产生方角
-        ellipse_kernel = cv2.getStructuringElement(
-            cv2.MORPH_ELLIPSE,
-            (max(int(erosion_radius * scale_w), 1), max(int(erosion_radius * scale_h), 1)),
-        )
-        inv_mask_center = cv2.erode(inv_mask_erosion_cpu, ellipse_kernel)
-        inv_mask_center_tensor = torch.from_numpy(inv_mask_center).to(device=self.device, dtype=self.dtype)[None, None, ...]
-
-        # Color correction: match generated face color to original in the overlap region
-        mask_for_color = inv_mask_erosion_t > 0.5
-        if mask_for_color.any():
-            for ch in range(3):
-                gen_ch = inv_face[ch][mask_for_color[ch]]
-                orig_ch = input_tensor[ch][mask_for_color[ch]]
-                if gen_ch.numel() > 100:
-                    gen_mean, gen_std = gen_ch.mean(), gen_ch.std().clamp(min=1.0)
-                    orig_mean, orig_std = orig_ch.mean(), orig_ch.std().clamp(min=1.0)
-                    inv_face[ch] = (inv_face[ch] - gen_mean) * (orig_std / gen_std) + orig_mean
-            inv_face = inv_face.clamp(0, 255)
+        inv_face = torch.where(valid_channels[..., None, None], adjusted_face, inv_face).clamp(0, 255)
 
         pasted_face = inv_mask_erosion_t * inv_face
 
-        # Wider blur for smoother blending transition
-        blur_size = w_edge * 4 + 1
+        blur_size = max(int(torch.max(w_edge * 4 + 1).item()), 3)
+        if blur_size % 2 == 0:
+            blur_size += 1
         sigma = 0.3 * ((blur_size - 1) * 0.5 - 1) + 0.8
         inv_soft_mask = kornia.filters.gaussian_blur2d(
-            inv_mask_center_tensor, (blur_size, blur_size), (sigma, sigma)
-        ).squeeze(0)
-        inv_soft_mask_3d = inv_soft_mask.expand_as(inv_face)
+            inv_mask_center,
+            (blur_size, blur_size),
+            (sigma, sigma),
+        )
+        inv_soft_mask_3d = inv_soft_mask.expand(-1, 3, -1, -1)
         blended = inv_soft_mask_3d * pasted_face + (1 - inv_soft_mask_3d) * input_tensor
-        blended = rearrange(blended, "c h w -> h w c").contiguous().to(dtype=torch.uint8)
+        blended = rearrange(blended, "b c h w -> b h w c").contiguous().clamp(0, 255).to(dtype=torch.uint8)
         return blended.cpu().numpy()
+
+    def restore_img(self, input_img: np.ndarray, face: Tensor, affine_matrix, scale_h: float = 1.0, scale_w: float = 1.0):
+        return self.restore_batch(
+            input_imgs=np.expand_dims(input_img, axis=0),
+            faces=face.unsqueeze(0),
+            affine_matrices=np.expand_dims(affine_matrix, axis=0),
+            scale_h=scale_h,
+            scale_w=scale_w,
+        )[0]
 
     def transformation_from_points(self, points1, points0, smooth: bool = True, p_bias=None):
         points2 = torch.tensor(points0, device=self.device, dtype=torch.float32) if isinstance(points0, np.ndarray) else points0.clone()
@@ -414,6 +483,11 @@ class LstmSync:
         # Optimization: Cache HuBERT model and feature extractor
         self._hubert_model: HubertModel | None = None
         self._feature_extractor: Wav2Vec2FeatureExtractor | None = None
+        # Cache face detection/alignment results for repeated avatar requests.
+        self._reference_cache: collections.OrderedDict[str, list[CachedReferenceFrame]] = collections.OrderedDict()
+        self._reference_cache_max_entries = max(int(os.getenv("DIGIHUMAN_REFERENCE_CACHE_SIZE", "2")), 0)
+        self._reference_prepack_enabled = os.getenv("DIGIHUMAN_REFERENCE_PREPACK", "1").lower() not in {"0", "false", "no"}
+        self.last_run_stats: dict[str, float] = {}
 
         repair_npy_path = self.checkpoints_dir / "repair.npy"
         auxiliary_path = self.checkpoints_dir / "auxiliary"
@@ -431,6 +505,113 @@ class LstmSync:
             mask_image=mask_image,
             dtype=torch.float32,
         )
+
+    def configure_request(
+        self,
+        batch_size: int,
+        sync_offset: int,
+        scale_h: float,
+        scale_w: float,
+        compress_inference_check_box: bool,
+        progress_callback=None,
+    ) -> None:
+        self.wav2lip_batch_size = batch_size
+        self.sync_offset = sync_offset
+        self.scale_h = scale_h
+        self.scale_w = scale_w
+        self.compress_inference_check_box = compress_inference_check_box
+        self._progress_callback = progress_callback
+
+    def preload_models(self) -> None:
+        self._get_onnx_session()
+        self._get_hubert()
+
+    @staticmethod
+    def _torch_dtype_from_numpy(np_dtype) -> torch.dtype:
+        return torch.float16 if np_dtype == np.float16 else torch.float32
+
+    @staticmethod
+    def _numpy_dtype_from_ort(type_name: str):
+        return np.float16 if "float16" in type_name else np.float32
+
+    def _bind_tensor_input(self, io_binding, name: str, tensor: Tensor, np_dtype) -> None:
+        io_binding.bind_input(name, "cuda", 0, np_dtype, tuple(tensor.shape), tensor.data_ptr())
+
+    def _bind_tensor_output(self, io_binding, name: str, tensor: Tensor, np_dtype) -> None:
+        io_binding.bind_output(name, "cuda", 0, np_dtype, tuple(tensor.shape), tensor.data_ptr())
+
+    def _run_gpu_recurrent_inference(
+        self,
+        session: ort.InferenceSession,
+        input_names: list[str],
+        output_names: list[str],
+        img_batch: np.ndarray,
+        mel_batch: np.ndarray,
+        sequence_offset: int,
+        hn_state: Tensor | None,
+        cn_state: Tensor | None,
+    ) -> tuple[Tensor, Tensor, Tensor]:
+        torch_dtype = self._torch_dtype_from_numpy(self.model_dtype)
+        img_batch_tensor = torch.from_numpy(np.ascontiguousarray(img_batch)).to(device=self.device, dtype=torch_dtype)
+        mel_batch_tensor = torch.from_numpy(np.ascontiguousarray(mel_batch)).to(device=self.device, dtype=torch_dtype)
+
+        x_frame_buffer = torch.empty_like(img_batch_tensor[0:1])
+        indiv_frame_buffer = torch.empty_like(mel_batch_tensor[0:1])
+        hn_in = (
+            hn_state.to(device=self.device, dtype=torch_dtype)
+            if hn_state is not None
+            else torch.zeros((2, 1, 576), device=self.device, dtype=torch_dtype)
+        )
+        cn_in = (
+            cn_state.to(device=self.device, dtype=torch_dtype)
+            if cn_state is not None
+            else torch.zeros((2, 1, 576), device=self.device, dtype=torch_dtype)
+        )
+        generated_buffer = torch.empty(
+            (1, 3, self.face_size, self.face_size),
+            device=self.device,
+            dtype=torch_dtype,
+        )
+        hn_out = torch.empty_like(hn_in)
+        cn_out = torch.empty_like(cn_in)
+        predictions = torch.empty(
+            (mel_batch_tensor.shape[0], 3, self.face_size, self.face_size),
+            device=self.device,
+            dtype=torch_dtype,
+        )
+
+        io_binding = session.io_binding()
+        input_np_dtype = self.model_dtype
+        output_np_dtypes = [self._numpy_dtype_from_ort(output.type) for output in session.get_outputs()]
+
+        self._bind_tensor_input(io_binding, input_names[0], indiv_frame_buffer, input_np_dtype)
+        self._bind_tensor_input(io_binding, input_names[1], x_frame_buffer, input_np_dtype)
+        self._bind_tensor_input(io_binding, input_names[2], hn_in, input_np_dtype)
+        self._bind_tensor_input(io_binding, input_names[3], cn_in, input_np_dtype)
+        self._bind_tensor_output(io_binding, output_names[0], generated_buffer, output_np_dtypes[0])
+        self._bind_tensor_output(io_binding, output_names[1], hn_out, output_np_dtypes[1])
+        self._bind_tensor_output(io_binding, output_names[2], cn_out, output_np_dtypes[2])
+
+        for frame_index in range(mel_batch_tensor.shape[0]):
+            global_frame_index = sequence_offset + frame_index
+            if global_frame_index == 0 or ((global_frame_index + 1) % self.syncnet_T == 0):
+                hn_in.zero_()
+                cn_in.zero_()
+
+            x_frame_buffer.copy_(img_batch_tensor[frame_index : frame_index + 1], non_blocking=True)
+            indiv_frame_buffer.copy_(mel_batch_tensor[frame_index : frame_index + 1], non_blocking=True)
+
+            if hasattr(io_binding, "synchronize_inputs"):
+                io_binding.synchronize_inputs()
+            session.run_with_iobinding(io_binding)
+            if hasattr(io_binding, "synchronize_outputs"):
+                io_binding.synchronize_outputs()
+
+            predictions[frame_index].copy_(generated_buffer[0])
+            hn_in.copy_(hn_out)
+            cn_in.copy_(cn_out)
+
+        return predictions, hn_in, cn_in
 
     def _report(self, step: str, progress: int, message: str) -> None:
         if self._progress_callback:
@@ -483,26 +664,40 @@ class LstmSync:
         return self._feature_extractor, self._hubert_model
 
     def _face_detect(self, images: list[np.ndarray]):
-        faces = []
-        boxes = []
-        affine_matrices = []
+        results: list[CachedReferenceFrame] = []
         for image in tqdm(images, desc="Detecting face"):
             frame = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             face, box, affine_matrix = self.detect_face.affine_transform(frame)
             face = rearrange(face.cpu().numpy(), "c h w -> h w c")
-            face = face[..., ::-1]
-            faces.append(face)
-            boxes.append(box)
-            affine_matrices.append(affine_matrix)
-        return [[face, box, affine] for face, box, affine in zip(faces, boxes, affine_matrices)]
+            packed_face = self._prepare_packed_face(face) if self._reference_prepack_enabled else None
+            results.append(
+                CachedReferenceFrame(
+                    face_rgb=face,
+                    coords=box,
+                    affine_matrix=affine_matrix,
+                    packed_face=packed_face,
+                )
+            )
+        return results
 
-    def _datagen(self, frames: list[np.ndarray], reps: list[np.ndarray]):
+    def _prepare_packed_face(self, face_rgb: np.ndarray) -> np.ndarray:
+        ref_pixel_values, masked_pixel_values, masks = self.detect_face.prepare_masks_and_masked_images(
+            np.expand_dims(face_rgb, axis=0)
+        )
+        packed_face = np.concatenate((masks, masked_pixel_values, ref_pixel_values), axis=1)[0]
+        return np.asarray(packed_face, dtype=self.model_dtype)
+
+    def _datagen(
+        self,
+        frames: list[np.ndarray],
+        reps: list[np.ndarray],
+        face_det_results: list[CachedReferenceFrame],
+    ):
         img_batch = []
         mel_batch = []
         frame_batch = []
         coords_batch = []
         affines_batch = []
-        face_det_results = self._face_detect(frames)
 
         for index, rep in enumerate(reps):
             frame_count = len(frames)
@@ -511,14 +706,17 @@ class LstmSync:
             else:
                 frame_index = frame_count - 1 - index % frame_count
 
-            frame_to_save = frames[frame_index].copy()
-            face, coords, affine_matrix = face_det_results[frame_index].copy()
-            face = cv2.cvtColor(face, cv2.COLOR_BGR2RGB)
-            img_batch.append(face)
+            frame_to_save = frames[frame_index]
+            cached_frame = face_det_results[frame_index]
+            packed_face = cached_frame.packed_face
+            if packed_face is None:
+                packed_face = self._prepare_packed_face(cached_frame.face_rgb)
+                cached_frame.packed_face = packed_face
+            img_batch.append(packed_face)
             mel_batch.append(rep)
             frame_batch.append(frame_to_save)
-            coords_batch.append(coords)
-            affines_batch.append(affine_matrix)
+            coords_batch.append(cached_frame.coords)
+            affines_batch.append(cached_frame.affine_matrix)
 
             if len(img_batch) >= self.wav2lip_batch_size:
                 yield self._pack_batch(img_batch, mel_batch, frame_batch, coords_batch, affines_batch)
@@ -535,11 +733,34 @@ class LstmSync:
         coords_batch: list[list[int]],
         affines_batch: list[np.ndarray],
     ):
-        img_array = np.asarray(img_batch)
+        img_array = np.asarray(img_batch, dtype=self.model_dtype)
         mel_array = np.asarray(mel_batch)
-        ref_pixel_values, masked_pixel_values, masks = self.detect_face.prepare_masks_and_masked_images(img_array)
-        packed_img = np.concatenate((masks, masked_pixel_values, ref_pixel_values), axis=1)
-        return packed_img, mel_array, frame_batch, coords_batch, affines_batch
+        return img_array, mel_array, frame_batch, coords_batch, affines_batch
+
+    def _get_reference_cache_key(self, video_path: Path) -> str:
+        stat = video_path.stat()
+        return f"{video_path}:{stat.st_mtime_ns}:{stat.st_size}:{self.face_size}"
+
+    def _get_cached_face_results(self, video_path: Path):
+        if self._reference_cache_max_entries <= 0:
+            return None
+        cache_key = self._get_reference_cache_key(video_path)
+        cached = self._reference_cache.get(cache_key)
+        if cached is None:
+            return None
+        self._reference_cache.move_to_end(cache_key)
+        logger.info("Reference cache hit: %s", video_path.name)
+        return cached
+
+    def _store_cached_face_results(self, video_path: Path, face_det_results: list[CachedReferenceFrame]) -> None:
+        if self._reference_cache_max_entries <= 0:
+            return
+        cache_key = self._get_reference_cache_key(video_path)
+        self._reference_cache[cache_key] = face_det_results
+        self._reference_cache.move_to_end(cache_key)
+        while len(self._reference_cache) > self._reference_cache_max_entries:
+            evicted_key, _ = self._reference_cache.popitem(last=False)
+            logger.info("Reference cache evicted: %s", evicted_key)
 
     def run(
         self,
@@ -553,6 +774,8 @@ class LstmSync:
     ) -> Path:
         if compress_inference_check_box is not None:
             self.compress_inference_check_box = compress_inference_check_box
+        stats: dict[str, float] = {}
+        total_start = time.perf_counter()
 
         self._report("preprocessing", 5, "视频预处理中...")
         source_video_path = Path(video_path).expanduser().resolve()
@@ -560,12 +783,15 @@ class LstmSync:
         source_audio_path = Path(audio_path).expanduser().resolve()
         temp_audio_path = Path(audio_temp_path).expanduser().resolve()
         final_video_path = Path(video_out_path).expanduser().resolve()
+        reference_cache_source = source_video_path
 
         session = self._get_onnx_session()
         input_names = [input_info.name for input_info in session.get_inputs()]
+        output_names = [output_info.name for output_info in session.get_outputs()]
         model_input_type = session.get_inputs()[0].type
         self.model_dtype = np.float16 if "float16" in model_input_type else np.float32
 
+        normalize_start = time.perf_counter()
         if get_video_fps(source_video_path) != 25:
             if not self.compress_inference_check_box:
                 if not self._try_nvenc_fps_normalize(source_video_path, fps25_path):
@@ -597,7 +823,9 @@ class LstmSync:
             normalized_video = fps25_path
         else:
             normalized_video = source_video_path
+        stats["normalize_video_seconds"] = round(time.perf_counter() - normalize_start, 4)
 
+        read_video_start = time.perf_counter()
         video_stream = cv2.VideoCapture(str(normalized_video))
         fps = video_stream.get(cv2.CAP_PROP_FPS)
         full_frames = []
@@ -610,7 +838,10 @@ class LstmSync:
 
         if not full_frames:
             raise RuntimeError(f"No frames could be read from reference video: {normalized_video}")
+        stats["read_frames_seconds"] = round(time.perf_counter() - read_video_start, 4)
+        stats["reference_frame_count"] = float(len(full_frames))
 
+        audio_prep_start = time.perf_counter()
         run_command(
             [
                 self.ffmpeg_bin,
@@ -624,8 +855,10 @@ class LstmSync:
                 str(temp_audio_path),
             ]
         )
+        stats["prepare_audio_seconds"] = round(time.perf_counter() - audio_prep_start, 4)
 
         self._report("audio_features", 20, "提取音频特征...")
+        feature_start = time.perf_counter()
         feature_extractor, hubert_model = self._get_hubert()
         wav, sample_rate = sf.read(str(temp_audio_path))
         input_values = feature_extractor(wav, sampling_rate=sample_rate, return_tensors="pt").input_values
@@ -636,6 +869,7 @@ class LstmSync:
         with torch.no_grad():
             outputs = hubert_model(input_values)
             reps = outputs.last_hidden_state.permute(0, 2, 1).cpu().numpy()
+        stats["audio_features_seconds"] = round(time.perf_counter() - feature_start, 4)
 
         rep_step_size = 10
         rep_chunks = []
@@ -648,16 +882,29 @@ class LstmSync:
                 break
             rep_chunks.append(reps[0, :, start_idx : start_idx + rep_step_size])
             index += 1
+        stats["audio_chunk_count"] = float(len(rep_chunks))
 
         self._report("face_detection", 35, "人脸检测...")
         frame_height, frame_width = full_frames[0].shape[:-1]
         total_batches = int(np.ceil(float(len(full_frames)) / self.wav2lip_batch_size))
-        use_cpu_resize = self.runtime.resolved != "cuda"
+        face_prep_start = time.perf_counter()
+        face_det_results = self._get_cached_face_results(reference_cache_source)
+        cache_hit = face_det_results is not None
+        if face_det_results is None:
+            face_det_results = self._face_detect(full_frames)
+            self._store_cached_face_results(reference_cache_source, face_det_results)
+        else:
+            self._report("face_detection", 35, "人脸检测已命中缓存...")
+        stats["reference_cache_hit"] = 1.0 if cache_hit else 0.0
+        stats["prepare_reference_seconds"] = round(time.perf_counter() - face_prep_start, 4)
 
         # 时序平滑缓冲：用最近N帧的加权平均消除嘴部抖动
         _SMOOTH_WINDOW = 3
         _smooth_weights = np.array([0.25, 0.35, 0.40], dtype=np.float32)  # 越新权重越大
         smooth_buf: collections.deque = collections.deque(maxlen=_SMOOTH_WINDOW)
+        sequence_offset = 0
+        hn = None
+        cn = None
 
         # Optimization: Use FFmpeg pipe instead of cv2.VideoWriter to encode directly to H.264
         use_nvenc = self.runtime.resolved == "cuda" and self._check_nvenc_available()
@@ -665,71 +912,87 @@ class LstmSync:
         logger.info("Starting FFmpeg pipe: %s", " ".join(ffmpeg_cmd))
         # stdout=DEVNULL 避免 FFmpeg stdout 缓冲区满导致 pipe deadlock
         pipe = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        inference_seconds = 0.0
 
         try:
             for batch_index, (img_batch, mel_batch, frames, coords, affines) in enumerate(
                 tqdm(
-                    self._datagen(full_frames, rep_chunks),
+                    self._datagen(full_frames, rep_chunks, face_det_results),
                     total=total_batches,
                     desc="Generating video",
                 )
             ):
                 pct = 40 + int(50 * batch_index / max(total_batches, 1))
                 self._report("inference", pct, f"推理中 {batch_index * self.wav2lip_batch_size}/{len(rep_chunks)}")
+                batch_start = time.perf_counter()
                 mel_batch = np.transpose(mel_batch, (0, 2, 1))
-                generated_frames = []
-                for frame_index in range(mel_batch.shape[0]):
-                    if (batch_index == 0 and frame_index == 0) or (
-                        (batch_index * self.wav2lip_batch_size + frame_index + 1) % self.syncnet_T == 0
-                    ):
-                        hn = np.zeros((2, 1, 576), dtype=self.model_dtype)
-                        cn = np.zeros((2, 1, 576), dtype=self.model_dtype)
-
-                    x_frame = np.expand_dims(img_batch[frame_index, :, :, :].astype(self.model_dtype), axis=0)
-                    indiv_frame = np.expand_dims(mel_batch[frame_index, :, :].astype(self.model_dtype), axis=0)
-                    generated, hn, cn = session.run(
-                        None,
-                        {
-                            input_names[0]: indiv_frame,
-                            input_names[1]: x_frame,
-                            input_names[2]: hn,
-                            input_names[3]: cn,
-                        },
+                if self.runtime.resolved == "cuda":
+                    prediction_tensor, hn, cn = self._run_gpu_recurrent_inference(
+                        session=session,
+                        input_names=input_names,
+                        output_names=output_names,
+                        img_batch=np.ascontiguousarray(img_batch.astype(self.model_dtype)),
+                        mel_batch=np.ascontiguousarray(mel_batch.astype(self.model_dtype)),
+                        sequence_offset=sequence_offset,
+                        hn_state=hn,
+                        cn_state=cn,
                     )
-                    generated_frames.append(generated.squeeze().astype(np.float32))
+                    prediction_tensor = prediction_tensor[:, [2, 1, 0], :, :]
+                    target_h = int(coords[0][3] - coords[0][1])
+                    target_w = int(coords[0][2] - coords[0][0])
+                    resized_batch = resize_tensor_batch(prediction_tensor, size=(target_h, target_w))
+                else:
+                    generated_frames = []
+                    for frame_index in range(mel_batch.shape[0]):
+                        global_frame_index = sequence_offset + frame_index
+                        if global_frame_index == 0 or ((global_frame_index + 1) % self.syncnet_T == 0):
+                            hn = np.zeros((2, 1, 576), dtype=self.model_dtype)
+                            cn = np.zeros((2, 1, 576), dtype=self.model_dtype)
 
-                prediction = np.stack(generated_frames, axis=0)
-                for pred, frame, coords_item, affine in zip(prediction, frames, coords, affines):
-                    x1, y1, x2, y2 = coords_item
-                    pred = pred[[2, 1, 0], :, :]
-                    target_h, target_w = int(y2 - y1), int(x2 - x1)
-
-                    if use_cpu_resize:
-                        # Optimization: Use cv2.resize on CPU to avoid unnecessary tensor/GPU transfers
-                        pred_hwc = np.transpose(pred, (1, 2, 0))
-                        resized_np = cv2.resize(pred_hwc, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
-                        resized = rearrange(torch.from_numpy(resized_np), "h w c -> c h w")
-                    else:
-                        resized = resize_tensor_image(
-                            torch.from_numpy(pred).to(self.device),
-                            size=(target_h, target_w),
+                        x_frame = np.expand_dims(img_batch[frame_index, :, :, :].astype(self.model_dtype), axis=0)
+                        indiv_frame = np.expand_dims(mel_batch[frame_index, :, :].astype(self.model_dtype), axis=0)
+                        generated, hn, cn = session.run(
+                            None,
+                            {
+                                input_names[0]: indiv_frame,
+                                input_names[1]: x_frame,
+                                input_names[2]: hn,
+                                input_names[3]: cn,
+                            },
                         )
+                        generated_frames.append(generated.squeeze().astype(np.float32))
 
-                    # 时序平滑：对生成的嘴部区域在时间轴上做加权平均，消除帧间抖动
+                    prediction = np.stack(generated_frames, axis=0)[:, [2, 1, 0], :, :]
+                    target_h = int(coords[0][3] - coords[0][1])
+                    target_w = int(coords[0][2] - coords[0][0])
+                    pred_batch = torch.from_numpy(prediction)
+                    resized_batch = resize_tensor_batch(pred_batch, size=(target_h, target_w))
+
+                smoothed_frames = []
+                for resized in resized_batch:
                     smooth_buf.append(resized.float())
                     n = len(smooth_buf)
                     if n == 1:
                         smoothed = smooth_buf[0]
                     else:
-                        # 权重必须与缓存帧在同一 device，否则 CUDA 路径下触发 device mismatch
                         w = torch.from_numpy(_smooth_weights[-n:]).to(
                             device=smooth_buf[0].device, dtype=smooth_buf[0].dtype
                         )
                         w = w / w.sum()
                         smoothed = sum(w[i] * smooth_buf[i] for i in range(n))
+                    smoothed_frames.append(smoothed)
 
-                    merged = self.detect_face.restorer.restore_img(frame, smoothed, affine, scale_h=self.scale_h, scale_w=self.scale_w)
+                merged_batch = self.detect_face.restorer.restore_batch(
+                    input_imgs=np.stack(frames, axis=0),
+                    faces=torch.stack(smoothed_frames, dim=0),
+                    affine_matrices=np.stack(affines, axis=0),
+                    scale_h=self.scale_h,
+                    scale_w=self.scale_w,
+                )
+                for merged in merged_batch:
                     pipe.stdin.write(merged.tobytes())
+                sequence_offset += mel_batch.shape[0]
+                inference_seconds += time.perf_counter() - batch_start
 
                 if (batch_index + 1) % 50 == 0:
                     gc.collect()
@@ -738,8 +1001,9 @@ class LstmSync:
         finally:
             if pipe.stdin:
                 pipe.stdin.close()
+                pipe.stdin = None
             self._report("compositing", 92, "等待编码完成...")
-            # 修复：用 communicate() 同时消费 stderr，避免 PIPE 缓冲区满导致死锁
+            compose_start = time.perf_counter()
             _, stderr_bytes = pipe.communicate()
             stderr_output = stderr_bytes.decode(errors="replace") if stderr_bytes else ""
             if pipe.returncode != 0:
@@ -748,7 +1012,12 @@ class LstmSync:
             gc.collect()
             if self.runtime.resolved == "cuda":
                 torch.cuda.empty_cache()
+            stats["compositing_seconds"] = round(time.perf_counter() - compose_start, 4)
 
+        stats["inference_loop_seconds"] = round(inference_seconds, 4)
+        stats["total_seconds"] = round(time.perf_counter() - total_start, 4)
+        self.last_run_stats = stats
+        logger.info("Digital human stats: %s", stats)
         self._report("completed", 100, "完成")
         return final_video_path
 
@@ -815,4 +1084,3 @@ class LstmSync:
         except Exception:
             logger.info("NVENC not available for FPS normalization, falling back to libx264")
             return False
-

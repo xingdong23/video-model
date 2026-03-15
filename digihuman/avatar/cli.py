@@ -18,7 +18,7 @@ def build_parser() -> argparse.ArgumentParser:
     faces = subparsers.add_parser("faces", help="List available preset face videos")
     faces.add_argument("--tuilionnx-dir")
     faces.add_argument("--ffmpeg-bin")
-    faces.add_argument("--runtime", choices=["auto", "cuda", "cpu"], default="auto")
+    faces.add_argument("--runtime", choices=["auto", "tensorrt", "cuda", "cpu"], default="auto")
 
     generate = subparsers.add_parser("generate", help="Generate a digital human video")
     generate.add_argument("--audio", required=True, help="Input audio file path")
@@ -33,7 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     generate.add_argument("--beautify-teeth", action="store_true")
     generate.add_argument("--tuilionnx-dir")
     generate.add_argument("--ffmpeg-bin")
-    generate.add_argument("--runtime", choices=["auto", "cuda", "cpu"], default="auto")
+    generate.add_argument("--runtime", choices=["auto", "tensorrt", "cuda", "cpu"], default="auto")
 
     return parser
 

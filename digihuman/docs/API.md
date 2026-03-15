@@ -279,7 +279,7 @@ async def handle_callback(payload: dict):
 | `scale_w` | float | N | 3.6 | 融合区域横向比例 |
 | `compress_inference` | bool | N | false | 是否压缩推理 |
 | `beautify_teeth` | bool | N | false | 是否美化牙齿 |
-| `runtime` | string | N | null | 运行时 (auto/cuda/cpu) |
+| `runtime` | string | N | null | 运行时 (auto/tensorrt/cuda/cpu) |
 | `callback_url` | string | N | null | 任务完成后回调的 URL |
 
 **响应** (202)：
@@ -299,7 +299,17 @@ async def handle_callback(payload: dict):
   "download_url": "/api/v1/files/xxx",
   "elapsed_seconds": 180.5,
   "runtime": "cuda",
-  "runtime_description": "NVIDIA GeForce RTX 4090"
+  "runtime_description": "NVIDIA GeForce RTX 4090",
+  "diagnostics": {
+    "normalize_video_seconds": 0.8,
+    "read_frames_seconds": 1.6,
+    "prepare_audio_seconds": 0.2,
+    "audio_features_seconds": 0.9,
+    "prepare_reference_seconds": 4.2,
+    "inference_loop_seconds": 18.3,
+    "compositing_seconds": 1.1,
+    "reference_cache_hit": 1
+  }
 }
 ```
 

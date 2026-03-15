@@ -128,10 +128,12 @@
 默认是 `--runtime auto`：
 
 - 有可用 NVIDIA CUDA 和 `CUDAExecutionProvider` 时，自动走原来的 CUDA 链路
+- 如果机器同时具备 TensorRT provider，会优先走 TensorRT
 - 否则自动退回 `CPU experimental`
 
 也可以手动指定：
 
+- `--runtime tensorrt`
 - `--runtime cuda`
 - `--runtime cpu`
 
@@ -192,6 +194,14 @@ cd /path/to/digihuman
 - `--scale-w`
 - `--compress-inference`
 - `--beautify-teeth`
+
+## 服务端加速建议
+
+- 同一个进程内会复用已加载的 ONNX session 和 HuBERT，避免每次请求重复加载大模型。
+- 同一个参考视频在进程内会缓存人脸检测和对齐结果，固定 avatar 的重复请求会明显更快。
+- 如果开启 `DIGIHUMAN_REFERENCE_PREPACK=1`，还会缓存参考帧对应的模型输入张量，减少重复请求的 CPU 预处理。
+- 如果是常驻 API 服务，建议开启 `DIGIHUMAN_DIGITAL_HUMAN_WARMUP=1`，让启动阶段先把运行时准备好。
+- 固定数字人较多时，可用 `DIGIHUMAN_REFERENCE_CACHE_SIZE` 控制缓存几个参考视频，默认 `2`。
 
 ## 独立性
 

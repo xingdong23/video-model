@@ -46,6 +46,7 @@ def _execute_digital_human(task: Task, params: dict) -> dict:
         "elapsed_seconds": result.elapsed_seconds,
         "runtime": result.runtime,
         "runtime_description": result.runtime_description,
+        "diagnostics": result.diagnostics,
     }
 
 

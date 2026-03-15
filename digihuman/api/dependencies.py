@@ -48,6 +48,9 @@ class EngineManager:
             ffmpeg_bin=settings.digital_human_ffmpeg_bin,
             runtime=settings.digital_human_runtime,
         )
+        if settings.digital_human_warmup:
+            logger.info("Preparing DigitalHumanEngine runtime ...")
+            self._digital_human_engine.prepare_runtime()
         logger.info("DigitalHumanEngine ready")
 
     @property

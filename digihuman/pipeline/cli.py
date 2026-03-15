@@ -85,7 +85,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--voice-model-dir")
     run.add_argument("--tuilionnx-dir")
     run.add_argument("--ffmpeg-bin")
-    run.add_argument("--runtime", choices=["auto", "cuda", "cpu"], default="auto")
+    run.add_argument("--runtime", choices=["auto", "tensorrt", "cuda", "cpu"], default="auto")
     run.set_defaults(subtitle_vad_filter=True, bgm_loop=True)
 
     return parser

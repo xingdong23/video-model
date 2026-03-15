@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     digital_human_tuilionnx_dir: Optional[str] = None
     digital_human_ffmpeg_bin: Optional[str] = None
     digital_human_runtime: str = "auto"
+    digital_human_warmup: bool = False
 
     # Subtitle engine
     subtitle_model_name: Optional[str] = None
